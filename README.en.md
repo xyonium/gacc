@@ -133,7 +133,8 @@ xdg-settings get default-web-browser    # should print gacc-acc01.desktop
 ```
 
 Programs running on Windows are unaffected — they use the Windows default browser.
-See [docs/antigravity.md](docs/antigravity.md) for the full walkthrough.
+See [docs/antigravity.md](docs/antigravity.md) for the full walkthrough (including the
+`bin/agsw` multi-slot manager).
 
 ## Sandbox and the yellow bar
 

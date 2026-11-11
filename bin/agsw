@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+# =============================================================================
+#  agsw —— Antigravity 多账号槽位管理（每个槽位一套独立配置目录）
+#
+#  Antigravity 本体只保存一个登录态（$XDG_CONFIG_HOME/Antigravity）。想同时挂多个账号，
+#  给它不同的配置根目录即可：Electron 的 userData 跟着 XDG_CONFIG_HOME 走，
+#  再叠加 --user-data-dir 做显式标记，两个槽位就能同时存在、互不干扰。
+#
+#  用法：
+#    ./bin/agsw list                 列出槽位和运行状态
+#    ./bin/agsw new work             新建槽位
+#    ./bin/agsw run work             用 work 槽位启动
+#    ./bin/agsw run work --gacc 2    同一次启动里，把登录弹窗指向 gacc 的 2 号账户
+#    ./bin/agsw run work -- <参数>   把额外参数透传给 Antigravity
+#    ./bin/agsw stop work            关掉该槽位
+#    ./bin/agsw rm work              删除槽位（会二次确认）
+#    ./bin/agsw status               只打印谁在跑
+#
+#  安全默认：
+#    · 槽位全部落在 $AGSW_HOME（默认 ~/.local/share/agsw），不碰你的 ~/.config/Antigravity
+#    · 每个槽位的真实状态在 <槽位>/userdata（Electron 认 --user-data-dir，单实例锁也按它隔离）
+#    · 只有显式给 --gacc N 才会改系统默认浏览器，且之前的值会被记录，可 --revert-default 还原
+#    · --dry-run 只打印将要执行的命令
+# =============================================================================
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+AGSW_HOME="${AGSW_HOME:-$HOME/.local/share/agsw}"
+SLOTS="$AGSW_HOME/slots"
+DRY=0
+GACC=""
+NO_BROWSER=0
+
+say()  { printf '%s\n' "$*"; }
+step() { printf '\n\033[32m==>\033[0m %s\n' "$*"; }
+die()  { printf '\033[31m✘ %s\033[0m\n' "$*" >&2; exit 1; }
+
+# ---------------------------------------------------------------- 二进制探测
+find_bin() {
+  if [[ -n "${AGSW_BIN:-}" ]]; then printf '%s\n' "$AGSW_BIN"; return; fi
+  local c
+  for c in \
+    "$HOME/opt/antigravity/Antigravity-x64/antigravity" \
+    "$ROOT/../opt/antigravity/Antigravity-x64/antigravity" \
+    "$HOME/cc-499/opt/antigravity/Antigravity-x64/antigravity" \
+    /opt/antigravity/Antigravity-x64/antigravity \
+    /usr/lib/antigravity/antigravity ; do
+    [[ -x "$c" ]] && { printf '%s\n' "$c"; return; }
+  done
+  command -v antigravity 2>/dev/null || true
+}
+
+slot_dir() { printf '%s/%s' "$SLOTS" "$1"; }
+
+# 槽位在跑的证据：命令行里带 --user-data-dir=<槽位>
+slot_pids() {
+  local ud; ud="$(slot_dir "$1")/userdata"
+  local pid cmd
+  while read -r pid cmd; do
+    case "$cmd" in
+      *"--user-data-dir=$ud"*) printf '%s\n' "$pid" ;;
+    esac
+  done < <(ps -eo pid=,args= 2>/dev/null)
+}
+
+cmd_list() {
+  [[ -d "$SLOTS" ]] || { say "还没有槽位。新建：$0 new <名字>"; return 0; }
+  printf '%-12s %-8s %-11s %s\n' 槽位 状态 登录态 配置目录
+  local d name pids size
+  for d in "$SLOTS"/*/; do
+    [[ -d "$d" ]] || continue
+    name="$(basename "$d")"
+    pids="$(slot_pids "$name" | head -1)"
+    if [[ -d "$d/userdata/Local Storage" || -d "$d/config/Antigravity" ]]; then size=有; else size=无; fi
+    printf '%-12s %-8s %-11s %s\n' "$name" "$([[ -n "$pids" ]] && echo "运行中" || echo 停止)" "$size" "$d"
+  done
+}
+
+cmd_status() {
+  local d name pids
+  for d in "$SLOTS"/*/; do
+    [[ -d "$d" ]] || continue
+    name="$(basename "$d")"
+    pids="$(slot_pids "$name" | tr '\n' ' ')"
+    [[ -n "${pids// }" ]] && printf '%-12s pid %s\n' "$name" "$pids"
+  done
+}
+
+cmd_new() {
+  local name="$1"
+  [[ "$name" =~ ^[A-Za-z0-9._-]+$ ]] || die "槽位名只能用字母数字 . _ -"
+  local d; d="$(slot_dir "$name")"
+  if [[ -d "$d" ]]; then
+    say "槽位已存在：$d"
+  else
+    if (( DRY )); then say "（dry-run）会创建 $d/{config,cache,data,userdata,logs}"; return 0; fi
+    mkdir -p "$d"/{config,cache,data,userdata,logs}
+    say "✔ 已创建槽位 $name → $d"
+  fi
+}
+
+cmd_run() {
+  local name="$1"; shift || true
+  local bin; bin="$(find_bin)"
+  [[ -n "$bin" ]] || die "找不到 antigravity 可执行文件。用 AGSW_BIN=/path/to/antigravity 指定"
+  [[ -x "$bin" ]] || die "$bin 不可执行"
+
+  local d; d="$(slot_dir "$name")"
+  if [[ ! -d "$d" ]]; then
+    (( DRY )) || { mkdir -p "$d"/{config,cache,data,userdata,logs}; say "（自动创建槽位 $name）"; }
+  fi
+
+  if [[ -n "$(slot_pids "$name" | head -1)" ]]; then
+    say "! 槽位 $name 已经在运行（pid $(slot_pids "$name" | head -1)），不再启动第二个。"
+    say "  要重启：$0 stop $name"
+    return 0
+  fi
+
+  # 需要时把「系统默认浏览器」指向对应 gacc 账户，登录弹窗才会落进那个 profile
+  if [[ -n "$GACC" ]] && (( ! NO_BROWSER )); then
+    local setter="$ROOT/bin/install-shortcuts.sh"
+    if [[ -x "$setter" ]]; then
+      if (( DRY )); then
+        say "（dry-run）会执行：$setter --accounts \"$GACC\" --as-default $GACC"
+      else
+        "$setter" --accounts "$GACC" --as-default "$GACC" >/dev/null 2>&1 \
+          && say "✔ 登录弹窗已指向 gacc 账户 $GACC（原默认浏览器已记录，可 --revert-default 还原）" \
+          || say "! 设置默认浏览器失败，登录弹窗可能落在别的浏览器里"
+      fi
+    fi
+  fi
+
+  local -a cmd=("$bin" "--user-data-dir=$(slot_dir "$name")/userdata" "$@")
+  if (( DRY )); then
+    say "（dry-run）会执行："
+    printf '  XDG_CONFIG_HOME=%s/config XDG_CACHE_HOME=%s/cache XDG_DATA_HOME=%s/data \\\n    %q' \
+      "$d" "$d" "$d" "${cmd[0]}"
+    printf ' %q' "${cmd[@]:1}"; printf '\n'
+    return 0
+  fi
+
+  step "启动槽位 $name"
+  setsid --fork nohup env \
+      XDG_CONFIG_HOME="$d/config" \
+      XDG_CACHE_HOME="$d/cache" \
+      XDG_DATA_HOME="$d/data" \
+      GSETTINGS_BACKEND=memory \
+      "${cmd[@]}" </dev/null >>"$d/logs/launch.log" 2>&1 &
+
+  local pid=""
+  for _ in $(seq 1 40); do
+    pid="$(slot_pids "$name" | head -1)"; [[ -n "$pid" ]] && break; sleep 0.3
+  done
+  sleep 2
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    say "✔ 槽位 $name 已启动 (pid $pid)"
+    say "  配置目录 : $d"
+    say "  登录态   : $([[ -d "$d/config/Antigravity" ]] && echo 已生成 || echo 首次启动会在授权后生成)"
+    say "  日志     : $d/logs/launch.log"
+  else
+    say "✘ 启动失败，日志末尾："
+    grep -viE 'dconf|Fontconfig|libva|gbm|vaapi|EGL|GLX|Vulkan' "$d/logs/launch.log" 2>/dev/null | tail -8
+    return 1
+  fi
+}
+
+cmd_stop() {
+  local name="$1" pids
+  pids="$(slot_pids "$name" | tr '\n' ' ')"
+  if [[ -z "${pids// }" ]]; then say "槽位 $name 没在跑"; return 0; fi
+  (( DRY )) && { say "（dry-run）会 kill $pids"; return 0; }
+  # shellcheck disable=SC2086
+  kill $pids 2>/dev/null || true
+  sleep 2
+  pids="$(slot_pids "$name" | tr '\n' ' ')"
+  [[ -z "${pids// }" ]] && say "✔ 已停止 $name" || say "! 仍有残留：$pids"
+}
+
+cmd_rm() {
+  local name="$1" d; d="$(slot_dir "$name")"
+  [[ -d "$d" ]] || die "槽位不存在：$name"
+  [[ -n "$(slot_pids "$name" | head -1)" ]] && die "槽位 $name 还在运行，先 stop"
+  (( DRY )) && { say "（dry-run）会删除 $d"; return 0; }
+  read -r -p "删除槽位 $name 的全部数据（含登录态）？[y/N] " a
+  [[ "$a" == [yY] ]] || { say "已取消"; return 0; }
+  rm -rf "$d"
+  say "✔ 已删除 $name"
+}
+
+# ---------------------------------------------------------------- main
+[[ $# -ge 1 ]] || { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+CMD="$1"; shift
+
+# 解析通用开关（可在子命令前后）
+ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run) DRY=1; shift ;;
+    --gacc) [[ $# -ge 2 ]] || die "--gacc 后面要跟账户号"; GACC="$2"; shift 2 ;;
+    --no-browser-switch) NO_BROWSER=1; shift ;;
+    --) shift; ARGS+=("$@"); break ;;
+    *) ARGS+=("$1"); shift ;;
+  esac
+done
+
+case "$CMD" in
+  list)   cmd_list ;;
+  status) cmd_status ;;
+  new)    [[ ${#ARGS[@]} -ge 1 ]] || die "用法：$0 new <名字>"; cmd_new "${ARGS[0]}" ;;
+  run)    [[ ${#ARGS[@]} -ge 1 ]] || die "用法：$0 run <名字> [--gacc N]"; cmd_run "${ARGS[0]}" "${ARGS[@]:1}" ;;
+  stop)   [[ ${#ARGS[@]} -ge 1 ]] || die "用法：$0 stop <名字>"; cmd_stop "${ARGS[0]}" ;;
+  rm)     [[ ${#ARGS[@]} -ge 1 ]] || die "用法：$0 rm <名字>"; cmd_rm "${ARGS[0]}" ;;
+  -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) die "不认识的子命令：$CMD（list/new/run/stop/rm/status）" ;;
+esac

@@ -150,7 +150,7 @@ xdg-settings get default-web-browser    # 应为 gacc-acc01.desktop
 ```
 
 Windows 上的程序不受影响（它调的是 Windows 默认浏览器）。
-完整流程见 [docs/antigravity.md](docs/antigravity.md)。
+完整流程（含多账号槽位 `bin/agsw`）见 [docs/antigravity.md](docs/antigravity.md)。
 
 ## 沙箱与那条黄条
 

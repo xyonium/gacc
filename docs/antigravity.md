@@ -97,6 +97,42 @@ sudo apt install xclip        # 已经装过就跳过
 `gacc` 现在的行为是：检测到实例已在运行且带着 URL 时，**不再启动第二个实例**
 （那样只会抢 profile 锁并弹 "already running"），而是按上面两条给出提示。
 
+
+## 多账号槽位（实验性，`bin/agsw`）
+
+Antigravity 本体只保存**一个**登录态。要同时挂多个账号，就得给它不同的配置根目录：
+Electron 的 `--user-data-dir` 决定 userData，单实例锁也按它隔离，所以多个槽位可以**同时运行**。
+
+```bash
+./bin/agsw list                 # 槽位 + 运行状态
+./bin/agsw new work             # 新建槽位
+./bin/agsw run work             # 用 work 槽位启动
+./bin/agsw run work --gacc 2    # 同时把登录弹窗指向 gacc 的 2 号账户
+./bin/agsw stop work
+./bin/agsw rm work              # 会二次确认，删前先 stop
+./bin/agsw run work --dry-run   # 只打印将要执行的命令
+```
+
+槽位数据在 `~/.local/share/agsw/slots/<名字>/userdata`，和现有的
+`~/.config/Antigravity` 完全隔离——**新建槽位不会影响你当前的登录**。
+
+**先别直接用于正式环境**，用独立的根目录试（这也是验证它不会越界的最快方式）：
+
+```bash
+AGSW_HOME=/tmp/agsw-test ./bin/agsw new t1
+AGSW_HOME=/tmp/agsw-test ./bin/agsw run t1 --no-browser-switch
+AGSW_HOME=/tmp/agsw-test ./bin/agsw list
+AGSW_HOME=/tmp/agsw-test ./bin/agsw stop t1
+```
+
+- `--no-browser-switch`：不改系统默认浏览器（`--gacc N` 才需要改）。
+- 在受限 shell（带 `PR_SET_NO_NEW_PRIVS`，比如被别的沙箱套住）里启动 Chromium 会报
+  `Zygote process exited prematurely`，这时加 `-- --no-sandbox`。普通终端不需要。
+
+> 已知：这个脚本的管理功能（建/列/停/删/状态检测、`--user-data-dir` 隔离）已验证；
+> **GUI 的实际启动没能在开发环境里跑通**（沙箱挡住了 `/dev/shm` 和 setuid helper），
+> 你在自己的终端里跑才作数。
+
 ## 启动日志里那些"看起来像错误"的行
 
 | 日志 | 判断 |
