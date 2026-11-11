@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   gacc.ps1 —— 一个 Google 账户 = 一个 Firefox profile + 一个独立代理（Windows 版）
 

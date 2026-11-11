@@ -104,6 +104,45 @@ resolve_url() {
   curl -fsSIL -m 40 -o /dev/null -w '%{url_effective}' "$u" 2>/dev/null || true
 }
 
+# 用 Mozilla 官方的 SHA256SUMS 校验下载物。拿不到就告警放行（镜像站可能不提供），
+# 能拿到但哈希不符则直接中止——宁可装不上，也不装一个被替换过的浏览器。
+verify_tarball() {
+  local url="$1" file="$2" base sums want got
+  command -v sha256sum >/dev/null 2>&1 || { warn "系统没有 sha256sum，跳过校验"; return 0; }
+  [[ -f "$file" ]] || return 0
+  base="${url%/linux-x86_64/*}"
+  sums="$DIR/download/SHA256SUMS"
+  if ! curl -fsSL -m 60 -o "$sums" "$base/SHA256SUMS" 2>/dev/null; then
+    warn "拿不到 $base/SHA256SUMS，跳过校验（建议手动核对）"
+    return 0
+  fi
+  # 必须按「相对路径」匹配，不能只看文件名：SHA256SUMS 里
+  # linux-x86_64/en-US/firefox-X.tar.xz 和 linux-x86_64/zh-CN/firefox-X.tar.xz
+  # 同名但哈希不同，按 basename 匹配会取到别的语言包。
+  rel="$(printf '%s' "$url" | sed -E 's#^.*/releases/[^/]+/##')"
+  # 自定义 --ff-url（镜像/自建源）可能不含 /releases/<ver>/ 结构，此时 rel 会等于整条 URL
+  [[ "$rel" == *"/"* && "$rel" != *"://"* ]] || rel=""
+  want=""
+  [[ -n "$rel" ]] && want="$(awk -v r="$rel" '$2 == r {print $1; exit}' "$sums")"
+  if [[ -z "$want" ]]; then
+    # 镜像站布局可能不同：退回到 basename，但要求唯一命中，否则不放行
+    local cand
+    cand="$(awk -v b="$(basename "$file")" 'substr($2, length($2)-length(b)+1) == b {print $1}' "$sums" | sort -u)"
+    if [[ -n "$cand" && "$(printf '%s\n' "$cand" | wc -l)" -eq 1 ]]; then
+      want="$cand"
+    else
+      warn "SHA256SUMS 里无法唯一确定 $(basename "$file")，跳过校验"
+      return 0
+    fi
+  fi
+  got="$(sha256sum "$file" | awk '{print $1}')"
+  if [[ "$got" == "$want" ]]; then
+    ok "SHA256 校验通过（${got:0:16}…）"
+  else
+    die "SHA256 不匹配！期望 $want，实际 $got —— 已中止，请检查网络或镜像"
+  fi
+}
+
 if [[ -x "$FFBIN" && $FORCE -eq 0 ]]; then
   ok "已有 $FFBIN，跳过下载（--force 可重装）"
 else
@@ -128,6 +167,8 @@ else
     mv "$TARBALL.part" "$TARBALL"
     ok "下载完成（$(du -h "$TARBALL" | cut -f1)）"
   fi
+
+  verify_tarball "$URL" "$TARBALL"
 
   rm -rf "$DIR/firefox"
   tar -xf "$TARBALL" -C "$DIR" || die "解压失败（tar 支持 xz 吗？）"

@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: bash syntax
+        run: |
+          set -e
+          for f in bin/gacc bin/gen-fonts.sh bin/install-shortcuts.sh deploy-gacc.sh; do
+            echo "== $f"
+            bash -n "$f"
+          done
+
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning bin/gacc bin/gen-fonts.sh bin/install-shortcuts.sh deploy-gacc.sh
+
+      - name: validate json
+        run: |
+          for f in etc/policies.json; do
+            python3 -m json.tool "$f" > /dev/null
+            echo "ok: $f"
+          done

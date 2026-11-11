@@ -97,7 +97,13 @@ done
 
 # ---------------- 2) Windows 桌面 .lnk ----------------
 if (( ! NO_WIN )) && command -v powershell.exe >/dev/null 2>&1; then
-  DISTRO="${WSL_DISTRO_NAME:-Ubuntu}"
+  DISTRO="${WSL_DISTRO_NAME:-}"
+  if [[ -z "$DISTRO" ]]; then
+    DISTRO="Ubuntu"
+    echo "  ! 读不到 WSL_DISTRO_NAME，桌面快捷方式默认按 -d Ubuntu 生成" >&2
+    echo "    如果不是这个名字，右键快捷方式→属性，把 -d 后面的参数改成你的发行版名" >&2
+    echo "    （在终端跑 \`wsl.exe -l -q\` 可以看列表）" >&2
+  fi
   # PowerShell 里这段是单引号字符串，路径中含 ' 必须转义成 ''，否则参数被截断
   PS_GACC="${GACC//\'/\'\'}"
   PS_DISTRO="${DISTRO//\'/\'\'}"
