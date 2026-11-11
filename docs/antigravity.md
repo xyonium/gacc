@@ -86,10 +86,10 @@ Antigravity 的验证页在 DOM 里就是一条外链：
 然后点 Verify——`xdg-open` 会重新拉起浏览器并**直接带着 URL 启动**，验证页正常出现。
 标签页有会话恢复，关掉不会丢。
 
-**路 B：让 URL 自动进剪贴板**
+**路 B：让 URL 自动进剪贴板**（`install-antigravity.sh` 默认会装 `xclip`）
 
 ```bash
-sudo apt install xclip
+sudo apt install xclip        # 已经装过就跳过
 ```
 
 之后点 Verify 会在终端打印提示、并把 URL 放进剪贴板，切到窗口 `Ctrl+T` 粘贴回车即可。

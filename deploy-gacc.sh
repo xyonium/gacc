@@ -818,6 +818,11 @@ sed -i "s|\$(dirname \"\$0\")|$DIR|" "$DIR/QUICKSTART.md"
 printf '\n%s部署完成%s\n' "$c_ok" "$c_off"
 printf '  目录   %s\n' "$DIR"
 printf '  账户   %s\n' "$(printf 'acc%02d ' $(seq 1 "$ACCOUNTS"))"
+if command -v xclip >/dev/null 2>&1; then
+  printf '  剪贴板  xclip 已装（实例已在跑时，链接会自动进剪贴板）\n'
+else
+  printf '  剪贴板  未装 xclip —— sudo apt install xclip 后，链接会自动进剪贴板\n'
+fi
 printf '  沙箱   %s\n' "$( ((USERNS)) && echo '本机可开 → 启动时保持开启' || echo '本机不可用 → 启动时自动关闭（会有黄条）' )"
 printf '\n  下一步：\n'
 printf '    cd %s\n    ./bin/gacc 1\n\n' "$DIR"

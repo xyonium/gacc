@@ -34,8 +34,9 @@ any missing shared libraries without root, writes the config, creates accounts a
 render smoke test. It never touches the Firefox already installed on your system.
 
 **Requirements:** `bash 4+`, `curl`, `tar`, `awk`, `sed`, plus `dpkg` on Debian/Ubuntu
-(used to unpack missing `.so` files — no root needed). WSL2 needs WSLg (`DISPLAY` set) to
-show windows; over plain SSH you can install but not run it.
+(used to unpack missing `.so` files — no root needed). WSL2 needs WSLg (`DISPLAY` set) to show windows; over plain SSH you can install but not
+run it. Recommended: `sudo apt install xclip` so links land on the clipboard when the
+account is already running (optional).
 
 Already installed? Then just:
 

@@ -65,7 +65,7 @@ sudo apt install -y \
   libnss3 libnspr4 libxkbcommon-x11-0 libxcb-cursor0 libxcb-keysyms1 \
   libgbm1 libasound2 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 \
   libxcomposite1 libxdamage1 libxrandr2 libpango-1.0-0 libcairo2 libgtk-3-0 libx11-xcb1 \
-  libxi6 libxtst6 libxcursor1 libxshmfence1 xdg-utils
+  libxi6 libxtst6 libxcursor1 libxshmfence1 xdg-utils xclip
 
 say "修 chrome-sandbox（Electron/Chromium 在 Linux 的标准步骤）"
 SB="$(dirname "$BIN")/chrome-sandbox"

@@ -32,8 +32,8 @@ cd gacc-install && ./bin/gacc 1      # 启动第 1 个账户
 写配置、建账户，最后跑一次渲染自检。**不碰系统里已有的 Firefox。**
 
 **前置条件**：`bash 4+`、`curl`、`tar`、`awk`、`sed`；Debian/Ubuntu 系还要 `dpkg`
-（用来解包缺失的 `.so`，不需要 root）。WSL2 需要 WSLg（`DISPLAY` 非空）才有窗口，
-纯 SSH 环境只能装、不能用。
+（用来解包缺失的 `.so`，不需要 root）。WSL2 需要 WSLg（`DISPLAY` 非空）才有窗口，纯 SSH 环境只能装、不能用。
+另推荐 `sudo apt install xclip`：实例已在运行时，`gacc` 会把链接放进剪贴板（可选，不装也能用）。
 
 已经有装好的一份？直接：
 
