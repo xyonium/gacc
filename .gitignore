@@ -1,0 +1,18 @@
+# 账户数据（含真实登录态，绝对不能提交）
+profiles/
+**/cookies.sqlite
+**/cookies.sqlite-wal
+**/logins.json
+**/key4.db
+# 运行时：每账户的 HOME / 缓存 / 字体缓存
+runtime/
+# 便携版浏览器与本地补丁的 .so（体积大，由 deploy-gacc.sh 现场下载）
+firefox/
+libs/
+download/
+# 运行时生成的 Windows 快捷方式脚本
+share/
+# 临时验证产物
+.verify/
+.smoke*
+*.log

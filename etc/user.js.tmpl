@@ -1,0 +1,50 @@
+// ============================================================
+// gacc profile 硬化模板 —— 由 bin/gacc 每次启动时渲染成 user.js
+// 改这里，不要改 profiles/*/user.js（会被覆盖）
+// 占位符：@PROXY@ @PERSONA@ @SANDBOX@ 由 gacc 生成
+// ============================================================
+
+// ---------- 代理（每个 profile 独立，Firefox 原生支持） ----------
+@PROXY@
+
+// ---------- 指纹人设（每账户不同，见 gacc <n> --fp） ----------
+@PERSONA@
+
+// ---------- 沙箱（仅在环境不支持时才会写入） ----------
+@SANDBOX@
+
+// ---------- WebRTC / DNS 泄漏防护 ----------
+user_pref("media.peerconnection.ice.proxy_only", true);
+user_pref("media.peerconnection.enabled", false);        // 要用 Google Meet 就改 true
+user_pref("media.peerconnection.ice.default_address_only", true);
+user_pref("network.dns.disablePrefetch", true);
+user_pref("network.prefetch-next", false);
+user_pref("network.predictor.enabled", false);
+user_pref("network.http.speculative-parallel-limit", 0);
+user_pref("network.captive-portal-service.enabled", false);
+user_pref("network.connectivity-service.enabled", false);
+user_pref("browser.search.suggest.enabled", false);
+
+// ---------- 关掉 Firefox 自己的遥测 / 实验 / 账号同步 ----------
+user_pref("toolkit.telemetry.enabled", false);
+user_pref("toolkit.telemetry.unified", false);
+user_pref("toolkit.telemetry.archive.enabled", false);
+user_pref("toolkit.telemetry.server", "data:,");
+user_pref("datareporting.healthreport.uploadEnabled", false);
+user_pref("datareporting.policy.dataSubmissionEnabled", false);
+user_pref("app.shield.optoutstudies.enabled", false);
+user_pref("app.normandy.enabled", false);
+user_pref("browser.ping-centre.telemetry", false);
+user_pref("browser.discovery.enabled", false);
+user_pref("browser.newtabpage.activity-stream.feeds.telemetry", false);
+user_pref("browser.newtabpage.activity-stream.telemetry", false);
+user_pref("identity.fxaccounts.enabled", false);              // 无 Mozilla 账号 / 云同步
+user_pref("extensions.pocket.enabled", false);
+user_pref("browser.messaging-system.whatsNewPanel.enabled", false);
+
+// ---------- 启动行为：恢复上次会话，每个账户的标签页自动回来 ----------
+user_pref("browser.startup.page", 3);
+user_pref("browser.sessionstore.resume_from_crash", true);
+user_pref("browser.shell.checkDefaultBrowser", false);
+user_pref("browser.aboutConfig.showWarning", false);
+user_pref("browser.startup.homepage_override.mstone", "ignore");
