@@ -41,7 +41,7 @@ URL="$(curl -fsSL --compressed -m 40 "$PAGE" 2>/dev/null \
 echo "    $URL"
 
 say "下载并解压到 $DIR"
-mkdir -p "$DIR"
+mkdir -p "$DIR" 2>/dev/null || die "无法创建 $DIR（用 ANTIGRAVITY_DIR=/别的/位置 指定）"
 if [[ -f "$DIR/Antigravity.tar.gz" && -x "$(find "$DIR" -maxdepth 2 -name antigravity -type f 2>/dev/null | head -1)" ]]; then
   echo "    已存在，跳过下载（删掉 $DIR 可重装）"
 else

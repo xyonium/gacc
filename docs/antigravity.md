@@ -23,7 +23,9 @@ Antigravity(WSL) ──openExternal──▶ xdg 默认浏览器 ──▶ gacc 
 ## 安装
 
 ```bash
-./bin/install-antigravity.sh          # x64；ARM 用 `arm`
+./bin/install-antigravity.sh                       # 默认装到 ~/opt/antigravity
+ANTIGRAVITY_DIR=~/apps/ag ./bin/install-antigravity.sh   # 换位置
+./bin/install-antigravity.sh arm                   # ARM64
 ```
 
 脚本做的事（也就是官方的全部流程）：
