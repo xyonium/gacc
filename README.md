@@ -226,6 +226,13 @@ Windows 桌面上的 `Firefox 账户 NN.lnk` 直接删。最后删掉整个安�
 **能不能同时开两个同号？**
 不行，同一个 profile 只能有一个实例，先 `--stop` 再启动。
 
+**能不能用 `apt` / `snap` 装的 Firefox，而不是随包下载的便携版？**
+可以：`GACC_FIREFOX=/snap/bin/firefox ./bin/gacc 1`。
+注意 Ubuntu 22.04 的 `firefox` 包是 snap 转接包，snap 会**自动更新**，而每次更新都会改变
+UA / TLS / 渲染指纹——这套工具的价值在于指纹长期稳定，所以用 snap 的话请先
+`sudo snap refresh --hold firefox`。另外 snap 版的企业策略要放 `/etc/firefox/policies/`
+（要 root），便携版是直接放在安装目录里。
+
 **换了字体包之后要做什么？**
 重跑 `./bin/gen-fonts.sh N`，子集按新的字体池重建。
 

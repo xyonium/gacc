@@ -14,7 +14,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FF="$ROOT/firefox/firefox"
+# 默认用随包的便携版；设 GACC_FIREFOX 可以指向任意 Firefox（apt / snap / 自编译）
+FF="${GACC_FIREFOX:-$ROOT/firefox/firefox}"
 # 系统装了那几个 .so 就不用管；没装时找 libs/ 下的本地补丁（目录名随发行版变，故全量收集）
 LIBDIRS="$(find "$ROOT/libs" -name '*.so*' -printf '%h\n' 2>/dev/null | sort -u | paste -sd: - || true)"
 PROFROOT="$ROOT/profiles"
@@ -282,6 +283,7 @@ cmd_doctor() {  # $1=account
   local acc="$1" prof spec rest host port
   prof="$(prof_of "$acc")"; spec="$(cat "$(proxyfile_of "$acc")" 2>/dev/null || echo direct)"
   echo "账户 $acc"
+  echo "  Firefox : $FF"
   echo "  profile : $prof"
   echo "  代理    : $spec"
   if [[ "$spec" != "direct" ]]; then

@@ -196,6 +196,14 @@ Account directories are created on **first launch** — run `./bin/gacc N` once.
 **Can two instances share one account?**
 No, one profile = one instance. `--stop` first.
 
+**Can I use the Firefox I installed with `apt` / `snap` instead of the bundled portable build?**
+Yes: `GACC_FIREFOX=/snap/bin/firefox ./bin/gacc 1`.
+Mind that on Ubuntu 22.04 the `firefox` package is a snap transitional package, and snaps
+**auto-update** — every update changes the UA / TLS / rendering fingerprint, which defeats the
+point of a stable persona. If you go this route run `sudo snap refresh --hold firefox` first.
+Enterprise policies for a snap build also live in `/etc/firefox/policies/` (root required),
+whereas the portable build reads them from its own install directory.
+
 **I installed more fonts, now what?**
 Re-run `./bin/gen-fonts.sh N` to rebuild the subset from the new pool.
 
