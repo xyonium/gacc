@@ -121,6 +121,19 @@ Four accounts differ pairwise by 6–11 families while keeping full CJK coverage
 Side effect: developer-only fonts (e.g. `MesloLGS Nerd Font`) are not visible to accounts
 that use a subset.
 
+### Route a third-party app's login popup into one account
+
+Apps running inside WSL/Linux that call "the system browser" (e.g. Google Antigravity) can be
+pinned to one account:
+
+```bash
+./bin/install-shortcuts.sh --accounts 1 --as-default 1
+xdg-settings get default-web-browser    # should print gacc-acc01.desktop
+```
+
+Programs running on Windows are unaffected — they use the Windows default browser.
+See [docs/antigravity.md](docs/antigravity.md) for the full walkthrough.
+
 ## Sandbox and the yellow bar
 
 Firefox's content sandbox writes to `/proc/self/uid_map`. Some environments (containers, or a

@@ -140,6 +140,18 @@ RFP 会把**所有**账户抹成同一组值（时区强制 UTC、语言强制 e
 1. `~/.local/share/applications/gacc-accNN.desktop` → **WSLg 自动收进 Windows 开始菜单**；
 2. Windows 桌面 `.lnk` → `wsl.exe -d <发行版> -e <gacc> <N>`，最小化启动。
 
+### 让第三方应用的登录弹窗进指定账户
+
+跑在 WSL / Linux 里的应用（例如 Google Antigravity）调用「系统默认浏览器」时，可以把它固定到某个账户：
+
+```bash
+./bin/install-shortcuts.sh --accounts 1 --as-default 1
+xdg-settings get default-web-browser    # 应为 gacc-acc01.desktop
+```
+
+Windows 上的程序不受影响（它调的是 Windows 默认浏览器）。
+完整流程见 [docs/antigravity.md](docs/antigravity.md)。
+
 ## 沙箱与那条黄条
 
 Firefox 的内容沙箱要写 `/proc/self/uid_map`。某些环境（容器、或把终端套进别的文件沙箱里）

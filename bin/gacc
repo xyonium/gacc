@@ -369,12 +369,16 @@ PROF="$(prof_of "$ACC")"
 
 # 同一个 profile 只能有一个 Firefox 实例，否则会弹 "already running" 并且抢锁
 EXIST="$(pids_of_profile "$PROF" | head -1)"
+FORWARD=0
 if [[ -n "$EXIST" ]]; then
-  echo "✔ 账户 $ACC 已经在运行 (pid $EXIST)，不重复启动"
-  echo "  profile : $PROF"
-  echo "  代理    : $(cat "$PROF/proxy.conf")"
-  echo "  （要改用别的代理：先 ./bin/gacc $ACC --stop）"
-  exit 0
+  if (( ${#URLS[@]} == 0 )); then
+    echo "✔ 账户 $ACC 已经在运行 (pid $EXIST)，不重复启动"
+    echo "  profile : $PROF"
+    echo "  代理    : $(cat "$PROF/proxy.conf")"
+    echo "  （要改用别的代理：先 ./bin/gacc $ACC --stop）"
+    exit 0
+  fi
+  FORWARD=1
 fi
 
 [[ -n "$LIBDIRS" ]] && export LD_LIBRARY_PATH="$LIBDIRS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
@@ -406,10 +410,18 @@ fi
 # （恢复的窗口用 xulstore.json 里的旧尺寸，参数要么被忽略要么多开一个窗口）。
 # 窗口尺寸本来也会被用户拖动改变，不作为指纹维度。
 
-# --no-remote：允许同一 Firefox 同时跑多个 profile
+# 不能加 --no-remote：它会关掉「把 URL 交给同 profile 已运行实例」的能力，
+# 于是 xdg-open / 桌面快捷方式 / OAuth 登录弹窗全部会静默失败。
+# 不同 profile 之间不会互相接管（实测两个账户可并存），所以不需要它。
 # setsid --fork：双重脱离（新 session + 挂到 init 下），关终端也不带走浏览器
-setsid --fork nohup "$FF" --no-remote --profile "$PROF" \
+setsid --fork nohup "$FF" --profile "$PROF" \
       --class "gacc-$ACC" "${URLS[@]}" </dev/null >>"$PROF/firefox.log" 2>&1 &
+
+if (( FORWARD )); then
+  sleep 3
+  echo "✔ 已在账户 $ACC 的运行实例中打开：${URLS[*]}"
+  exit 0
+fi
 
 PID=""
 for _ in $(seq 1 30); do
