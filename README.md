@@ -107,8 +107,14 @@ bash deploy-gacc.sh --proxy-mode direct    # 没有代理时全直连
 
 顺带效果：`MesloLGS Nerd Font` 这类「开发者机器」标记在开了子集的账户里不可见。
 
-> 诚实评价：这条杠杆在本机约值 2–4 bit。想放大就多装常见字体包
-> （`fonts-croscore`、`fonts-crosextra-*`、`fonts-unifont` 等），池子越大子集差异越明显。
+选择方式是**分组互斥**：候选池按序号分成 4 组，每个账户只从自己那组里取 6~9 个，
+所以任意两个账户之间只共享「必含基础字体」，其余各不相同。实测 4 个账户两两相差
+**6~11 个家族**（并集 24~27），每个账户都有完整 CJK。
+
+> 想进一步放大：多装常见字体包（`fonts-croscore`、`fonts-crosextra-carlito`、
+> `fonts-crosextra-caladea`、`fonts-lohit-deva`、`fonts-kacst`、`fonts-unfonts-core`），
+> 池子变大后分组内可选范围更宽。反过来，`fonts-noto-extra`（326MB 的冷门文字）
+> 对这套选择器完全没用，可以直接 purge。
 
 ## 代理
 

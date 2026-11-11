@@ -34,7 +34,7 @@ CONF="$PROF/fonts.conf"
 FTMP="$ROOT/runtime/acc$NN/fontcache"
 
 # 普通桌面会有的字体族（白名单）。故意不含 Nerd Font，也不含 Tangut/SignWriting 这类冷门字。
-COMMON_RE='^(DejaVu (Sans|Serif|Sans Mono)( Condensed)?|Liberation (Sans|Serif|Mono)|Ubuntu( Mono)?|Free(Sans|Serif|Mono)|Noto (Sans|Serif|Mono)|Noto Sans Mono|Noto Color Emoji|Noto Sans CJK (SC|TC|JP|KR|HK)|Noto Sans Mono CJK (SC|TC|JP|KR|HK)|Noto Sans Symbols2?|Nimbus (Sans|Roman|Mono)( L)?|TeX Gyre .*|Carlito|Caladea|Croscore .*)$'
+COMMON_RE='^(DejaVu (Sans|Serif|Sans Mono)( Condensed)?|Liberation (Sans|Serif|Mono)|Ubuntu( Mono)?|Free(Sans|Serif|Mono)|Noto (Sans|Serif|Mono)|Noto Sans Mono|Noto Color Emoji|Noto Sans CJK (SC|TC|JP|KR|HK)|Noto Sans Mono CJK (SC|TC|JP|KR|HK)|Noto Sans Symbols2?|Nimbus (Sans|Roman|Mono)( L)?|TeX Gyre .*|Arimo|Tinos|Cousine|Carlito|Caladea|Croscore .*|Lohit .*|Kacst[A-Za-z]*|Un(Batang|Dinaru|Dotum|Graphic|Gungseo|Pilgi))$'
 
 mapfile -t PAIRS < <(fc-list --format '%{file}|%{family[0]}\n' 2>/dev/null | sort -u)
 CANDS=(); BASE=()
@@ -56,21 +56,28 @@ done
 
 (( ${#BASE[@]} )) || { echo "基础字体一个都没找到（装了 DejaVu 和 Noto CJK 吗？）" >&2; exit 1; }
 
-K=$(( 5 + ACC % 5 ))                      # 额外 5~9 个
+# 分组互斥：候选池按 index % GROUP 分成若干组，账户只从自己那组里取。
+# 这样两个账户之间只共享「必含基础字体」，差异最大化；同时每个账户的字体集
+# 依然是个合理的桌面子集（不会出现同一台机器上几十种语言字体全齐的怪相）。
 N=${#CANDS[@]}
+GROUP=4
+ARITY=$(( ACC % GROUP ))
+mapfile -t MYGROUP < <(i=0; while (( i < N )); do if (( i % GROUP == ARITY )); then printf '%s\n' "${CANDS[$i]}"; fi; i=$((i+1)); done)
+M=${#MYGROUP[@]}
+K=$(( 6 + ACC % 4 ))                      # 从本组里取 6~9 个
 
 build_set() { local seed=$1 i; local out=("${BASE[@]}")
-  if (( N > 0 )); then
-    for i in $(seq 0 $((K-1))); do out+=("${CANDS[$(( (seed + i * 3) % N ))]}"); done
+  if (( M > 0 )); then
+    for i in $(seq 0 $((K-1))); do out+=("${MYGROUP[$(( (seed + i) % M ))]}"); done
   fi
   printf '%s\n' "${out[@]}" | awk '!s[$0]++' | sort
 }
 sig() { while read -r l; do basename "$l"; done | sort | md5sum | cut -c1-8; }
 
-# 先算出候选集合，和别的账户比对签名，撞了就往后挪
+# 与已有账户比对签名，撞了就往后挪（同组内基本不会撞）
 CHOSEN=(); SIG=""
 for try in $(seq 0 15); do
-  mapfile -t CHOSEN < <(build_set $(( ACC * 7 + try )))
+  mapfile -t CHOSEN < <(build_set $(( (ACC * 3 + try) % (M > 0 ? M : 1) )))
   SIG="$(printf '%s\n' "${CHOSEN[@]}" | sig)"
   clash=0
   for other in "$ROOT"/profiles/acc*/fonts/.set; do
