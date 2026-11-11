@@ -21,6 +21,8 @@ DRY=0
 OUTDIR=""
 NO_WIN=0
 WITH_FONTS=0
+AS_DEFAULT=""
+REVERT=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -29,6 +31,8 @@ while [[ $# -gt 0 ]]; do
     --outdir)   OUTDIR="${2:?}"; shift 2 ;;
     --no-windows) NO_WIN=1; shift ;;
     --with-fonts) WITH_FONTS=1; shift ;;
+    --as-default) AS_DEFAULT="${2:?--as-default 后面要跟账户号}"; shift 2 ;;
+    --revert-default) REVERT=1; shift ;;
     --dry-run)  DRY=1; shift ;;
     -h|--help)  sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "不认识的参数：$1" >&2; exit 1 ;;
@@ -84,6 +88,7 @@ Icon=firefox
 Terminal=false
 StartupNotify=true
 Categories=Network;WebBrowser;
+MimeType=x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/about;text/html;text/xml;application/xhtml+xml;
 StartupWMClass=gacc-$n"
   if (( DRY )); then
     echo "--- $f ---"; printf '%s\n' "$body"; echo
@@ -94,6 +99,33 @@ StartupWMClass=gacc-$n"
     # 开始菜单能认，但第一次可能要刷新一下
   fi
 done
+
+# ---------------- 1.5) 设为 Linux 默认浏览器 ----------------
+if [[ -n "$AS_DEFAULT" ]]; then
+  f="$APP_DIR/gacc-acc$(printf '%02d' "$AS_DEFAULT").desktop"
+  [[ -f "$f" ]] || { echo "找不到 $f，先生成快捷方式" >&2; exit 1; }
+  if (( DRY )); then
+    echo "（dry-run）会执行：xdg-settings set default-web-browser $(basename "$f")"
+  else
+    update-desktop-database "$APP_DIR" 2>/dev/null || true
+    xdg-mime default "$(basename "$f")" x-scheme-handler/http x-scheme-handler/https \
+      text/html application/xhtml+xml 2>/dev/null || true
+    if xdg-settings set default-web-browser "$(basename "$f")"; then
+      echo "✔ Linux 默认浏览器已设为 $(basename "$f")"
+      echo "  验证：xdg-settings get default-web-browser  →  $(xdg-settings get default-web-browser 2>/dev/null)"
+    else
+      echo "! 设置失败。手动：xdg-settings set default-web-browser $(basename "$f")" >&2
+    fi
+  fi
+  echo
+fi
+
+if (( REVERT )) && (( ! DRY )); then
+  xdg-settings set default-web-browser firefox.desktop 2>/dev/null \
+    && echo "✔ 已还原为 firefox.desktop" \
+    || echo "! 还原失败，手动：xdg-settings set default-web-browser firefox.desktop" >&2
+  echo
+fi
 
 # ---------------- 2) Windows 桌面 .lnk ----------------
 if (( ! NO_WIN )) && command -v powershell.exe >/dev/null 2>&1; then
