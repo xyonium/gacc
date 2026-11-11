@@ -217,6 +217,11 @@ point of a stable persona. If you go this route run `sudo snap refresh --hold fi
 Enterprise policies for a snap build also live in `/etc/firefox/policies/` (root required),
 whereas the portable build reads them from its own install directory.
 
+**An instance is already running — what happens if I ask it to open a link?**
+Firefox will not hand a URL to an already running instance (tested with every launch variant).
+`gacc` therefore does not start a second instance (that would just fight over the profile lock);
+it tells you to either `--stop` first, or install `xclip` and paste from the clipboard.
+
 **I installed more fonts, now what?**
 Re-run `./bin/gen-fonts.sh N` to rebuild the subset from the new pool.
 

@@ -53,6 +53,13 @@ BIN="$(find "$DIR" -maxdepth 2 -name antigravity -type f | head -1)"
 chmod +x "$BIN"
 
 say "安装运行时依赖（需要 sudo）"
+if ! command -v apt-get >/dev/null 2>&1; then
+  die "本脚本只处理 Debian/Ubuntu 的依赖。其它发行版请手动装：
+       Fedora:  sudo dnf install nss nspr libxkbcommon xcb-util-cursor gtk3 alsa-lib \
+                         cups-libs libdrm mesa-libgbm atk at-spi2-atk pango cairo xdg-utils
+       Arch:    sudo pacman -S nss nspr libxkbcommon xcb-util-cursor gtk3 alsa-lib \
+                         cups libdrm mesa at-spi2-atk pango cairo xdg-utils"
+fi
 sudo apt update
 sudo apt install -y \
   libnss3 libnspr4 libxkbcommon-x11-0 libxcb-cursor0 libxcb-keysyms1 \

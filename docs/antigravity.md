@@ -63,20 +63,39 @@ Antigravity 的验证页在 DOM 里就是一条外链：
    target="_blank">Verify</a>
 ```
 
-`target="_blank"` 会被主进程的 `setWindowOpenHandler` 接走，转成
-`shell.openExternal()` → Linux 上就是调 `xdg-open` → `gacc N <url>`。
+`target="_blank"` 被主进程的 `setWindowOpenHandler` 接走，转成
+`shell.openExternal()` → Linux 上就是 `xdg-open` → `gacc N <url>`。
 
-**所以它能不能点动，完全取决于 `gacc` 会不会把 URL 交给已运行的实例。**
-`gacc` 早期版本在这里有个 bug：实例已在跑时直接退出，URL 被丢弃，表现就是「点了没反应」。
-现已修复（启动时不再加 `--no-remote`，同一 profile 的实例之间可以转交 URL）。
+问题在于**Firefox 不会把 URL 交给「同一 profile 已运行的实例」**。这不是配置问题，本环境实测过：
 
-升级后需要**重启一次该账户**，让运行中的实例切换成新模式：
+| 变量 | 结果 |
+|---|---|
+| 去掉 `--no-remote` | 仍然新起实例（并弹出 "already running"） |
+| 加 / 不加 `--class` | 都一样 |
+| `-profile <路径>` vs `-P <名字>`（注册进 profiles.ini） | 都一样 |
+| 有 / 没有 D-Bus session bus（`dbus-run-session`） | 都一样 |
+
+所以「点按钮 → 已经开着的窗口里弹出验证页」在这个环境里做不到。两条可用的路：
+
+**路 A：点之前先关掉那个账户**
 
 ```bash
-./bin/gacc 1 --stop && ./bin/gacc 1
+./bin/gacc 1 --stop
 ```
 
-实在不想修，也可以把链接直接粘到 profile 窗口里——验证流程本身只在 Google 侧。
+然后点 Verify——`xdg-open` 会重新拉起浏览器并**直接带着 URL 启动**，验证页正常出现。
+标签页有会话恢复，关掉不会丢。
+
+**路 B：让 URL 自动进剪贴板**
+
+```bash
+sudo apt install xclip
+```
+
+之后点 Verify 会在终端打印提示、并把 URL 放进剪贴板，切到窗口 `Ctrl+T` 粘贴回车即可。
+
+`gacc` 现在的行为是：检测到实例已在运行且带着 URL 时，**不再启动第二个实例**
+（那样只会抢 profile 锁并弹 "already running"），而是按上面两条给出提示。
 
 ## 启动日志里那些"看起来像错误"的行
 

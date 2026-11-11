@@ -107,6 +107,12 @@ if [[ -n "$AS_DEFAULT" ]]; then
   if (( DRY )); then
     echo "（dry-run）会执行：xdg-settings set default-web-browser $(basename "$f")"
   else
+    # 记下原来的默认浏览器，--revert-default 才有东西可还原
+    PREV="$(xdg-settings get default-web-browser 2>/dev/null || true)"
+    if [[ -n "$PREV" ]]; then
+      printf '%s\n' "$PREV" > "$APP_DIR/.gacc-prev-browser" 2>/dev/null || true
+      echo "   （原默认浏览器已记录：$PREV）"
+    fi
     update-desktop-database "$APP_DIR" 2>/dev/null || true
     xdg-mime default "$(basename "$f")" x-scheme-handler/http x-scheme-handler/https \
       text/html application/xhtml+xml 2>/dev/null || true
@@ -121,9 +127,30 @@ if [[ -n "$AS_DEFAULT" ]]; then
 fi
 
 if (( REVERT )) && (( ! DRY )); then
-  xdg-settings set default-web-browser firefox.desktop 2>/dev/null \
-    && echo "✔ 已还原为 firefox.desktop" \
-    || echo "! 还原失败，手动：xdg-settings set default-web-browser firefox.desktop" >&2
+  PREVFILE="$APP_DIR/.gacc-prev-browser"
+  prev=""
+  [[ -f "$PREVFILE" ]] && prev="$(cat "$PREVFILE" 2>/dev/null || true)"
+  if [[ -z "$prev" ]]; then
+    # 没有记录过原值：只挑真实存在的 .desktop，别硬编码 firefox.desktop
+    for cand in firefox.desktop firefox-esr.desktop chromium.desktop \
+                google-chrome.desktop microsoft-edge.desktop; do
+      if [[ -f "$APP_DIR/$cand" || -f "/usr/share/applications/$cand" ]]; then
+        prev="$cand"; break
+      fi
+    done
+  fi
+  if [[ -z "$prev" ]]; then
+    echo "! 没有记录过原来的默认浏览器，也没找到常见的浏览器 .desktop。" >&2
+    echo "  手动设：xdg-settings set default-web-browser <名字>.desktop" >&2
+    echo "  当前目录里有的：$(ls "$APP_DIR" 2>/dev/null | tr '\n' ' ')" >&2
+    exit 1
+  fi
+  if xdg-settings set default-web-browser "$prev"; then
+    echo "✔ 已还原为 $prev"
+    rm -f "$PREVFILE"
+  else
+    echo "! 还原失败，手动：xdg-settings set default-web-browser $prev" >&2
+  fi
   echo
 fi
 

@@ -245,6 +245,10 @@ UA / TLS / 渲染指纹——这套工具的价值在于指纹长期稳定，所
 `sudo snap refresh --hold firefox`。另外 snap 版的企业策略要放 `/etc/firefox/policies/`
 （要 root），便携版是直接放在安装目录里。
 
+**实例已经在跑，再让它打开一个链接会怎样？**
+Firefox 不会把 URL 交给已运行的实例（实测各种启动方式都不行）。`gacc` 这时不会启动第二个实例
+（那只会抢 profile 锁），而是提示你：要么先 `--stop` 再打开，要么装 `xclip` 后从剪贴板粘贴。
+
 **换了字体包之后要做什么？**
 重跑 `./bin/gen-fonts.sh N`，子集按新的字体池重建。
 

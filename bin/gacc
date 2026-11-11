@@ -32,8 +32,15 @@ persona_of()  { printf '%s/persona.conf' "$(prof_of "$1")"; }
 
 # 精确匹配某个 profile 的进程：路径后面必须紧跟空格或行尾，
 # 否则 acc01 会命中 acc010（10 号账户）的进程，--stop 就会杀错人。
+# 用 ps + 字面匹配而不是 pgrep 的正则：路径里含空格、括号、加号时，
+# 正则会把它们当元字符；而且 acc01 会命中 acc010。case 是纯字面比较，没有这些问题。
 pids_of_profile() {
-  pgrep -f -- "--profile $1( |\$)" 2>/dev/null || true
+  local pid cmd
+  while read -r pid cmd; do
+    case "$cmd" in
+      *"--profile $1 "*|*"--profile $1") printf '%s\n' "$pid" ;;
+    esac
+  done < <(ps -eo pid=,args= 2>/dev/null)
 }
 
 # ---------------------------------------------------------------- 指纹人设
@@ -369,7 +376,6 @@ PROF="$(prof_of "$ACC")"
 
 # 同一个 profile 只能有一个 Firefox 实例，否则会弹 "already running" 并且抢锁
 EXIST="$(pids_of_profile "$PROF" | head -1)"
-FORWARD=0
 if [[ -n "$EXIST" ]]; then
   if (( ${#URLS[@]} == 0 )); then
     echo "✔ 账户 $ACC 已经在运行 (pid $EXIST)，不重复启动"
@@ -378,7 +384,32 @@ if [[ -n "$EXIST" ]]; then
     echo "  （要改用别的代理：先 ./bin/gacc $ACC --stop）"
     exit 0
   fi
-  FORWARD=1
+  # 旧版 gacc 起的实例带 --no-remote，它根本收不到转发的 URL。
+  # 这种情况下直接启动会撞 profile 锁（弹 "already running"），所以先告诉用户。
+  case "$(ps -o args= -p "$EXIST" 2>/dev/null || true)" in
+    *--no-remote*)
+      echo "! 账户 $ACC 正在运行的实例是旧模式（带 --no-remote），收不到转发的 URL。" >&2
+      echo "  先 ./bin/gacc $ACC --stop 再 ./bin/gacc $ACC，之后就正常了。" >&2
+      exit 2 ;;
+  esac
+  # 实测：Firefox 不会把 URL 交给已运行的实例（--class / -P / 有无 dbus 全试过，
+  # 第二次启动只会留下一个 "already running" 对话框并抢 profile 锁）。
+  # 所以这里绝不再启动第二个实例，退化为「把 URL 交到用户手上」。
+  url="${URLS[0]}"
+  clip=0
+  if command -v xclip >/dev/null 2>&1 && printf '%s' "$url" | xclip -selection clipboard 2>/dev/null; then clip=1
+  elif command -v xsel >/dev/null 2>&1 && printf '%s' "$url" | xsel --clipboard --input 2>/dev/null; then clip=1
+  elif command -v wl-copy >/dev/null 2>&1 && printf '%s' "$url" | wl-copy 2>/dev/null; then clip=1
+  fi
+  echo "! 账户 $ACC 已经在运行，无法把 URL 注入这个实例（Firefox 限制）。" >&2
+  if (( clip )); then
+    echo "  ✔ URL 已复制到剪贴板 → 切到该窗口 Ctrl+T 再粘贴回车即可。" >&2
+  else
+    echo "  URL: $url" >&2
+    echo "  （装上 xclip 就会自动复制：sudo apt install xclip）" >&2
+  fi
+  echo "  或者：./bin/gacc $ACC --stop 之后再点一次，它会直接带着 URL 启动。" >&2
+  exit 0
 fi
 
 [[ -n "$LIBDIRS" ]] && export LD_LIBRARY_PATH="$LIBDIRS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
@@ -416,12 +447,6 @@ fi
 # setsid --fork：双重脱离（新 session + 挂到 init 下），关终端也不带走浏览器
 setsid --fork nohup "$FF" --profile "$PROF" \
       --class "gacc-$ACC" "${URLS[@]}" </dev/null >>"$PROF/firefox.log" 2>&1 &
-
-if (( FORWARD )); then
-  sleep 3
-  echo "✔ 已在账户 $ACC 的运行实例中打开：${URLS[*]}"
-  exit 0
-fi
 
 PID=""
 for _ in $(seq 1 30); do
