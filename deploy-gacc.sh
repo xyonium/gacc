@@ -25,6 +25,8 @@ FF_URL="${FF_URL:-}"
 FORCE=0
 SKIP_SMOKE=0
 NO_SHORTCUTS=0
+ASK_XCLIP=0
+SKIP_XCLIP=0
 
 c_ok=$'\033[32m'; c_warn=$'\033[33m'; c_err=$'\033[31m'; c_dim=$'\033[2m'; c_off=$'\033[0m'
 step()  { printf '\n%s==>%s %s\n' "$c_ok" "$c_off" "$*"; }
@@ -45,6 +47,8 @@ while [[ $# -gt 0 ]]; do
     --ff-url)       FF_URL="${2:?}"; shift 2 ;;
     --no-smoke)     SKIP_SMOKE=1; shift ;;
     --no-shortcuts) NO_SHORTCUTS=1; shift ;;
+    --with-xclip)   ASK_XCLIP=1; shift ;;
+    --no-xclip)     SKIP_XCLIP=1; shift ;;
     --force)        FORCE=1; shift ;;
     -h|--help)      usage ;;
     *) die "不认识的参数：$1（--help 看用法）" ;;
@@ -866,8 +870,29 @@ printf '  目录   %s\n' "$DIR"
 printf '  账户   %s\n' "$(printf 'acc%02d ' $(seq 1 "$ACCOUNTS"))"
 if command -v xclip >/dev/null 2>&1; then
   printf '  剪贴板  xclip 已装（实例已在跑时，链接会自动进剪贴板）\n'
+elif (( SKIP_XCLIP )); then
+  printf '  剪贴板  未装 xclip（--no-xclip，跳过）\n'
 else
-  printf '  剪贴板  未装 xclip —— sudo apt install xclip 后，链接会自动进剪贴板\n'
+  want=0
+  if (( ASK_XCLIP )); then
+    want=1
+  elif [[ -t 0 && -t 1 ]] && command -v apt-get >/dev/null 2>&1; then
+    printf '\n  xclip 没装。装上之后，账户已在运行时，登录/验证链接会自动进剪贴板。\n'
+    read -r -p "  现在装吗？（会在这步提示输入 sudo 密码）[y/N] " ans || ans=""
+    [[ "${ans:-}" == [yY] ]] && want=1
+  fi
+  if (( want )); then
+    printf '  正在安装 xclip…\n'
+    if command -v sudo >/dev/null 2>&1; then
+      sudo apt-get install -y xclip && printf '  剪贴板  ✔ xclip 已装\n' \
+        || printf '  剪贴板  ! 安装失败，稍后可手动：sudo apt install xclip\n'
+    else
+      apt-get install -y xclip && printf '  剪贴板  ✔ xclip 已装\n' \
+        || printf '  剪贴板  ! 安装失败，稍后可手动：apt install xclip\n'
+    fi
+  else
+    printf '  剪贴板  未装 xclip（可选）：sudo apt install xclip\n'
+  fi
 fi
 printf '  沙箱   %s\n' "$( ((USERNS)) && echo '本机可开 → 启动时保持开启' || echo '本机不可用 → 启动时自动关闭（会有黄条）' )"
 if (( ! NO_SHORTCUTS )) && [[ -n "${DISPLAY:-}" ]]; then
