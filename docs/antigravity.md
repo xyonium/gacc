@@ -105,12 +105,20 @@ Electron 的 `--user-data-dir` 决定 userData，单实例锁也按它隔离，�
 
 ```bash
 ./bin/agsw list                 # 槽位 + 运行状态
-./bin/agsw new work             # 新建槽位
+./bin/agsw login 2              # 一步到位：槽位 2 + 登录弹窗指向 gacc 2 号
+./bin/agsw new work             # 新建槽位（名字可以是 2 这样的纯数字）
 ./bin/agsw run work             # 用 work 槽位启动
 ./bin/agsw run work --gacc 2    # 同时把登录弹窗指向 gacc 的 2 号账户
 ./bin/agsw stop work
 ./bin/agsw rm work              # 会二次确认，删前先 stop
 ./bin/agsw run work --dry-run   # 只打印将要执行的命令
+```
+
+槽位名用账户号最省事：`agsw login 2` 等于 `agsw new 2` + `--as-default 2` + `agsw run 2`。
+登录成功后再次启动就不用带 `--gacc` 了（登录态已经存在槽位里）：
+
+```bash
+./bin/agsw run 2
 ```
 
 槽位数据在 `~/.local/share/agsw/slots/<名字>/userdata`，和现有的

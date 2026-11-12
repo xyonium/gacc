@@ -10,6 +10,7 @@
 #    ./bin/agsw list                 列出槽位和运行状态
 #    ./bin/agsw new work             新建槽位
 #    ./bin/agsw run work             用 work 槽位启动
+#    ./bin/agsw login 2              一步到位：槽位 2 + 登录弹窗指向 gacc 2 号
 #    ./bin/agsw run work --gacc 2    同一次启动里，把登录弹窗指向 gacc 的 2 号账户
 #    ./bin/agsw run work -- <参数>   把额外参数透传给 Antigravity
 #    ./bin/agsw stop work            关掉该槽位
@@ -164,6 +165,15 @@ cmd_run() {
   fi
 }
 
+# 一步到位：槽位名用账户号，浏览器也指向同一个账户
+cmd_login() {
+  local name="$1"
+  [[ "$name" =~ ^[0-9]+$ ]] || die "login 后面要跟账户号（例如 2），对应 gacc 的 2 号 profile"
+  GACC="${GACC:-$name}"
+  cmd_new "$name"
+  cmd_run "$name" "${ARGS[@]:1}"
+}
+
 cmd_stop() {
   local name="$1" pids
   pids="$(slot_pids "$name" | tr '\n' ' ')"
@@ -188,7 +198,7 @@ cmd_rm() {
 }
 
 # ---------------------------------------------------------------- main
-[[ $# -ge 1 ]] || { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+[[ $# -ge 1 ]] || { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 CMD="$1"; shift
 
 # 解析通用开关（可在子命令前后）
@@ -208,8 +218,9 @@ case "$CMD" in
   status) cmd_status ;;
   new)    [[ ${#ARGS[@]} -ge 1 ]] || die "用法：$0 new <名字>"; cmd_new "${ARGS[0]}" ;;
   run)    [[ ${#ARGS[@]} -ge 1 ]] || die "用法：$0 run <名字> [--gacc N]"; cmd_run "${ARGS[0]}" "${ARGS[@]:1}" ;;
+  login)  [[ ${#ARGS[@]} -ge 1 ]] || die "用法：$0 login <账户号>"; cmd_login "${ARGS[0]}" ;;
   stop)   [[ ${#ARGS[@]} -ge 1 ]] || die "用法：$0 stop <名字>"; cmd_stop "${ARGS[0]}" ;;
   rm)     [[ ${#ARGS[@]} -ge 1 ]] || die "用法：$0 rm <名字>"; cmd_rm "${ARGS[0]}" ;;
-  -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' ;;
-  *) die "不认识的子命令：$CMD（list/new/run/stop/rm/status）" ;;
+  -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) die "不认识的子命令：$CMD（list/new/run/login/stop/rm/status）" ;;
 esac
