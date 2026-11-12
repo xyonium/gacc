@@ -95,7 +95,7 @@ cmd_new() {
     say "槽位已存在：$d"
   else
     if (( DRY )); then say "（dry-run）会创建 $d/{config,cache,data,userdata,logs}"; return 0; fi
-    mkdir -p "$d"/{config,cache,data,userdata,logs}
+    mkdir -p "$d"/{home,config,cache,data,userdata,logs}
     say "✔ 已创建槽位 $name → $d"
   fi
 }
@@ -108,7 +108,7 @@ cmd_run() {
 
   local d; d="$(slot_dir "$name")"
   if [[ ! -d "$d" ]]; then
-    (( DRY )) || { mkdir -p "$d"/{config,cache,data,userdata,logs}; say "（自动创建槽位 $name）"; }
+    (( DRY )) || { mkdir -p "$d"/{home,config,cache,data,userdata,logs}; say "（自动创建槽位 $name）"; }
   fi
 
   if [[ -n "$(slot_pids "$name" | head -1)" ]]; then
@@ -134,17 +134,21 @@ cmd_run() {
   local -a cmd=("$bin" "--user-data-dir=$(slot_dir "$name")/userdata" "$@")
   if (( DRY )); then
     say "（dry-run）会执行："
-    printf '  XDG_CONFIG_HOME=%s/config XDG_CACHE_HOME=%s/cache XDG_DATA_HOME=%s/data \\\n    %q' \
+    printf '  HOME=%s/home XDG_CONFIG_HOME=%s/config XDG_DATA_HOME=%s/data \\\n    %q' \
       "$d" "$d" "$d" "${cmd[0]}"
     printf ' %q' "${cmd[@]:1}"; printf '\n'
     return 0
   fi
 
   step "启动槽位 $name"
+  # 必须连 HOME 一起换：Antigravity 把登录态放在 $HOME/.gemini（oauth_creds.json 等），
+  # 那不在 Electron 的 userData 里，只换 --user-data-dir 会让所有槽位共用同一个账号。
   setsid --fork nohup env \
+      HOME="$d/home" \
       XDG_CONFIG_HOME="$d/config" \
       XDG_CACHE_HOME="$d/cache" \
       XDG_DATA_HOME="$d/data" \
+      XDG_STATE_HOME="$d/state" \
       GSETTINGS_BACKEND=memory \
       "${cmd[@]}" </dev/null >>"$d/logs/launch.log" 2>&1 &
 

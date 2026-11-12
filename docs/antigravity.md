@@ -121,8 +121,12 @@ Electron 的 `--user-data-dir` 决定 userData，单实例锁也按它隔离，�
 ./bin/agsw run 2
 ```
 
-槽位数据在 `~/.local/share/agsw/slots/<名字>/userdata`，和现有的
-`~/.config/Antigravity` 完全隔离——**新建槽位不会影响你当前的登录**。
+槽位数据在 `~/.local/share/agsw/slots/<名字>/`，和现有的 `~/.config/Antigravity` 完全隔离。
+
+**注意：只换 `--user-data-dir` 是不够的。** Antigravity 把登录态放在 `$HOME/.gemini`
+（`oauth_creds.json`、`google_accounts.json`、`antigravity/`），那不属于 Electron 的
+userData，所以 `agsw` 连 `HOME` 一起换成 `<槽位>/home`。实测：新槽位首次启动显示
+"Welcome to Antigravity!"（未登录），而 `~/.gemini` 的时间戳不变。
 
 **先别直接用于正式环境**，用独立的根目录试（这也是验证它不会越界的最快方式）：
 
