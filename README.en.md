@@ -122,6 +122,22 @@ Four accounts differ pairwise by 6–11 families while keeping full CJK coverage
 Side effect: developer-only fonts (e.g. `MesloLGS Nerd Font`) are not visible to accounts
 that use a subset.
 
+### Adding an account: change one number
+
+Nothing needs to be pre-initialised. The first `./bin/gacc N` (or the first click on a shortcut
+where you edited the number) creates everything for that account:
+
+```
+profiles/accNN/  proxy.conf  persona.conf  user.js  containers.json
+runtime/accNN/   home/ config/ cache/ data/ run/
+```
+
+Firefox then adds `prefs.js`, `cookies.sqlite`, `places.sqlite` itself. The font subset is
+opt-in (`--fonts`); without it the account sees all system fonts.
+
+So `./bin/gacc 4` on a non-existent account simply creates and launches it — same for a
+shortcut whose `Exec=... gacc 1 %u` you changed to `gacc 4`.
+
 ### Route a third-party app's login popup into one account
 
 Apps running inside WSL/Linux that call "the system browser" (e.g. Google Antigravity) can be

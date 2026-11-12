@@ -129,6 +129,24 @@ RFP 会把**所有**账户抹成同一组值（时区强制 UTC、语言强制 e
 实测：同一段 JS 在系统配置下量出 `200 / 345.17 / 409.5` 三个宽度，在子集配置下**全部塌成 350**
 ——确认浏览器真的只看得见子集。四个账户两两相差 6~11 个家族，CJK 始终完整。
 
+### 加账户：改个数字就行
+
+**不需要手动初始化**。第一次执行 `./bin/gacc N`（或第一次点那个改了数字的快捷方式）时，会自动生成：
+
+```
+profiles/accNN/  proxy.conf      ← 默认 direct
+                 persona.conf    ← 随机分配一套美西人设（避开已用的时区）
+                 user.js         ← 每次启动按上面两个文件渲染
+                 containers.json ← G1–G4 容器身份
+runtime/accNN/   home/ config/ cache/ data/ run/   ← 这个账户独立的 HOME 和缓存
+```
+
+Firefox 自己再补 `prefs.js`、`cookies.sqlite`、`places.sqlite` 等。
+字体子集是**按需**的：只有加 `--fonts` 才生成 `fonts.conf`，不加就用系统全部字体。
+
+所以「4 号」不存在时，`./bin/gacc 4` 就等于「创建并启动 4 号」；快捷方式里的
+`Exec=... gacc 1 %u` 改成 `gacc 4` 也一样，点一下就把 4 号建好并打开。
+
 ### 桌面 / 开始菜单入口
 
 ```bash

@@ -17,13 +17,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIR="$SCRIPT_DIR/gaccounts"
-ACCOUNTS=3
+ACCOUNTS=1
 BASE_PORT=1081
 PROXY_MODE="auto"          # auto | direct | socks5 | http
 LANG_CODE="zh-CN"
 FF_URL="${FF_URL:-}"
 FORCE=0
 SKIP_SMOKE=0
+NO_SHORTCUTS=0
 
 c_ok=$'\033[32m'; c_warn=$'\033[33m'; c_err=$'\033[31m'; c_dim=$'\033[2m'; c_off=$'\033[0m'
 step()  { printf '\n%s==>%s %s\n' "$c_ok" "$c_off" "$*"; }
@@ -43,6 +44,7 @@ while [[ $# -gt 0 ]]; do
     --lang)         LANG_CODE="${2:?}"; shift 2 ;;
     --ff-url)       FF_URL="${2:?}"; shift 2 ;;
     --no-smoke)     SKIP_SMOKE=1; shift ;;
+    --no-shortcuts) NO_SHORTCUTS=1; shift ;;
     --force)        FORCE=1; shift ;;
     -h|--help)      usage ;;
     *) die "不认识的参数：$1（--help 看用法）" ;;
@@ -824,5 +826,14 @@ else
   printf '  剪贴板  未装 xclip —— sudo apt install xclip 后，链接会自动进剪贴板\n'
 fi
 printf '  沙箱   %s\n' "$( ((USERNS)) && echo '本机可开 → 启动时保持开启' || echo '本机不可用 → 启动时自动关闭（会有黄条）' )"
+if (( ! NO_SHORTCUTS )) && [[ -n "${DISPLAY:-}" ]]; then
+  step "生成桌面 / 开始菜单入口"
+  if "$DIR/bin/install-shortcuts.sh" --accounts "$ACCOUNTS" 2>&1 | sed 's/^/    /'; then
+    :
+  else
+    warn "快捷方式没生成成功，稍后手动跑：$DIR/bin/install-shortcuts.sh --accounts \"$ACCOUNTS\""
+  fi
+fi
+
 printf '\n  下一步：\n'
 printf '    cd %s\n    ./bin/gacc 1\n\n' "$DIR"

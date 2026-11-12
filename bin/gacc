@@ -263,7 +263,11 @@ cmd_list() {
     c="$(awk -F= '/^cores=/{print $2}'  "$d/persona.conf" 2>/dev/null || true)"
     t="$(awk -F= '/^tz=/{print $2}'     "$d/persona.conf" 2>/dev/null || true)"
     l="$(awk -F= '/^locale=/{print $2}' "$d/persona.conf" 2>/dev/null || true)"
-    printf '%-5s %-26s %-7s %-20s %s\n' "$acc" "$p" "${c:-?}" "${t:-?}" "${l:-?}"
+    if [[ -z "$c" ]]; then
+      printf '%-5s %-26s %-7s %-20s %s\n' "$acc" "$p" - 未初始化 -
+    else
+      printf '%-5s %-26s %-7s %-20s %s\n' "$acc" "$p" "$c" "$t" "$l"
+    fi
   done
 }
 
