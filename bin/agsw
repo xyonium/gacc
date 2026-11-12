@@ -144,7 +144,13 @@ cmd_run() {
 
   local d; d="$(slot_dir "$name")"
   if [[ ! -d "$d" ]]; then
-    (( DRY )) || { mkdir -p "$d"/{home,config,cache,data,userdata,logs}; say "（自动创建槽位 $name）"; }
+    (( DRY )) || {
+      mkdir -p "$d"/{home,config,cache,data,userdata,logs}
+      say "（自动创建槽位 $name —— 是空槽位，需要单独登录）"
+      if [[ -d "$HOME/.config/Antigravity" && -d "$HOME/.gemini" ]]; then
+        say "  想把现有的登录态复制进来：先 ./bin/agsw adopt $name，再 run"
+      fi
+    }
   fi
 
   if [[ -n "$(slot_pids "$name" | head -1)" ]]; then
