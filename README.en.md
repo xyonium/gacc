@@ -87,6 +87,20 @@ looking ordinary beats looking unique.
 from it on every launch. Only an explicit `--new-fp` re-rolls it. A fingerprint that changes
 daily is itself an anomaly.
 
+### Privileges
+
+`deploy-gacc.sh` needs **no root**: Firefox comes from Mozilla's portable tarball, and missing
+shared libraries are fetched with `apt-get download` + `dpkg -x` into `libs/` instead of being
+installed system-wide. Desktop entries go to `~/.local/share/applications/`.
+
+Optional `xclip` is offered interactively at the end of the deploy (answering `y` runs
+`sudo apt install` right there, so the password prompt appears in that step).
+`--with-xclip` / `--no-xclip` skip the question.
+
+`install-antigravity.sh` only calls `sudo` for packages that are actually missing (checked with
+`dpkg -s`) and for `chrome-sandbox`. Never run the whole script with `sudo` — `HOME` would become
+`/root`. `--check` lists missing packages without doing anything.
+
 ## Commands
 
 | Command | Effect |

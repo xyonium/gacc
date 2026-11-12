@@ -88,6 +88,19 @@ RFP 会把**所有**账户抹成同一组值（时区强制 UTC、语言强制 e
 `persona.conf` 首次生成后固化，`user.js` 每次启动按它重新渲染。
 只有显式 `--new-fp` 才会重掷。**指纹稳定性比多样性更重要**：同一账号今天一套明天一套，本身就是异常。
 
+### 权限模型（哪些要 sudo）
+
+| 步骤 | 要不要 root | 说明 |
+|---|---|---|
+| `bash deploy-gacc.sh` | **不要** | Firefox 走官方便携包；缺共享库时用 `apt-get download` + `dpkg -x` 解到 `libs/`，不动系统 |
+| 桌面 / 开始菜单项 | **不要** | 写到 `~/.local/share/applications/` |
+| 装 `xclip`（可选） | 要 | deploy 结束时会**问一句**，答 y 就当场 `sudo apt install`，密码提示出现在这一步 |
+| `./bin/install-antigravity.sh` | 依赖/沙箱那两步要 | 先 `dpkg -s` 查缺哪些包，只装缺的；不缺就完全不调 sudo。**不要 `sudo ./脚本`**，否则 `HOME=/root` 会装错地方 |
+| `./bin/agsw` | 不要 | 只设置 `XDG_*` 后启动 |
+
+开关：`deploy-gacc.sh --with-xclip`（不问直接装）/ `--no-xclip`（不问也不装）；
+`install-antigravity.sh --check` 只看依赖齐不齐，不下载、不动系统。
+
 ## 命令参考
 
 | 命令 | 作用 |
