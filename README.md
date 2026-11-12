@@ -137,7 +137,6 @@ RFP 会把**所有**账户抹成同一组值（时区强制 UTC、语言强制 e
 profiles/accNN/  proxy.conf      ← 默认 direct
                  persona.conf    ← 随机分配一套美西人设（避开已用的时区）
                  user.js         ← 每次启动按上面两个文件渲染
-                 containers.json ← G1–G4 容器身份
 runtime/accNN/   home/ config/ cache/ data/ run/   ← 这个账户独立的 HOME 和缓存
 ```
 
@@ -202,7 +201,7 @@ gacc/
 ├── bin/gen-fonts.sh          字体子集生成
 ├── bin/install-shortcuts.sh  开始菜单 / 桌面快捷方式
 ├── etc/user.js.tmpl          prefs 模板（@PROXY@ / @PERSONA@ / @SANDBOX@）
-├── etc/policies.json         企业策略：强装 MAC、关遥测/账号同步
+├── etc/user.js.tmpl          指纹 + 隐私 prefs 模板（不用企业策略）
 ├── deploy-gacc.sh            一键部署
 ├── windows/gacc.ps1          Windows 原生版（逻辑同源，未在 Windows 上实测）
 ├── docs/                     设计与两轮审计记录
@@ -224,7 +223,9 @@ Windows 桌面上的 `Firefox 账户 NN.lnk` 直接删。最后删掉整个安�
 - `profiles/` 里是真实登录态。`.gitignore` 已排除 `profiles/`、`runtime/`、`firefox/`、
   `libs/`、`download/`，并显式列出 `cookies.sqlite` / `logins.json` / `key4.db`。
 - 提交前自查：`git status --ignored` 不应出现任何 `profiles/` 内容。
-- 本工具不联网、不上报、无遥测。Firefox 的遥测与 Mozilla 账号同步由 `policies.json` 关闭。
+- 本工具不联网、不上报、无遥测。Firefox 的遥测与 Mozilla 账号同步由 `user.js` 关闭。
+- **刻意不用 `policies.json`**：企业策略会让 Firefox 在搜索 URL 里加 `channel=entpr`，
+  等于主动暴露「受管控的浏览器」。关遥测/锁更新全部用普通 prefs 实现。
 - `deploy-gacc.sh` 会校验 Mozilla 官方 `SHA256SUMS`；哈希不符直接中止。
 
 ## 已验证 / 未验证
@@ -260,7 +261,7 @@ Windows 桌面上的 `Firefox 账户 NN.lnk` 直接删。最后删掉整个安�
 可以：`GACC_FIREFOX=/snap/bin/firefox ./bin/gacc 1`。
 注意 Ubuntu 22.04 的 `firefox` 包是 snap 转接包，snap 会**自动更新**，而每次更新都会改变
 UA / TLS / 渲染指纹——这套工具的价值在于指纹长期稳定，所以用 snap 的话请先
-`sudo snap refresh --hold firefox`。另外 snap 版的企业策略要放 `/etc/firefox/policies/`
+`sudo snap refresh --hold firefox`。snap 版要放系统级策略则用 `/etc/firefox/policies/`
 （要 root），便携版是直接放在安装目录里。
 
 **实例已经在跑，再让它打开一个链接会怎样？**

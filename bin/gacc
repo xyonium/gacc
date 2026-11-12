@@ -123,17 +123,17 @@ user_pref("intl.accept_languages", "$P_ACCEPT");
 user_pref("dom.maxHardwareConcurrency", $P_CORES);
 user_pref("layout.css.devPixelsPerPx", "$P_DPR");
 user_pref("privacy.resistFingerprinting", false);   // RFP 会把所有账户抹成同一组值，反而利于关联
-user_pref("media.navigator.enabled", false);        // 不暴露摄像头/麦克风设备列表
+// 不要关 media.navigator.enabled：开着才正常；设备列表本身不含硬件指纹
 user_pref("javascript.use_us_english_locale", true);
 EOF
 }
 
 # ---------------------------------------------------------------- 代理
-ensure_policies() {
-  local dist="$ROOT/firefox/distribution"
-  mkdir -p "$dist"
-  cmp -s "$ROOT/etc/policies.json" "$dist/policies.json" 2>/dev/null ||
-    cp "$ROOT/etc/policies.json" "$dist/policies.json"
+# 不使用企业策略：policies.json 会让 Firefox 在 Google 搜索 URL 里注入
+# channel=entpr（等于主动告知对方「这是受管控的浏览器」）。遥测/更新锁等全部改用 user.js。
+# 老版本装出来的 policies.json 在这里顺手清掉。
+ensure_no_policies() {
+  rm -f "$ROOT/firefox/distribution/policies.json" 2>/dev/null || true
 }
 
 write_proxy() {  # $1=account $2=spec
@@ -205,23 +205,6 @@ EOF
   esac
 }
 
-seed_containers() {  # 给 Multi-Account Containers 预置 4 个身份（best-effort）
-  local prof="$1" f="$1/containers.json"
-  [[ -f "$f" ]] && return 0
-  cat > "$f" <<'EOF'
-{
-  "version": 5,
-  "lastUserContextId": 4,
-  "identities": [
-    { "userContextId": 1, "public": true, "icon": "circle",  "color": "blue",   "name": "G1" },
-    { "userContextId": 2, "public": true, "icon": "circle",  "color": "green",  "name": "G2" },
-    { "userContextId": 3, "public": true, "icon": "circle",  "color": "orange", "name": "G3" },
-    { "userContextId": 4, "public": true, "icon": "circle",  "color": "purple", "name": "G4" }
-  ]
-}
-EOF
-}
-
 prepare_profile() {  # $1=account
   local acc="$1" prof proxy_blk persona_blk sandbox_blk=""
   prof="$(prof_of "$acc")"
@@ -249,7 +232,6 @@ prepare_profile() {  # $1=account
     { print }
   ' "$TMPL" > "$prof/user.js.tmp"
   mv "$prof/user.js.tmp" "$prof/user.js"
-  seed_containers "$prof"
   printf '%s\n' "$prof"
 }
 
@@ -371,7 +353,7 @@ elif [[ "$FONTS" == "0" ]]; then
 fi
 
 prepare_profile "$ACC" >/dev/null
-ensure_policies
+ensure_no_policies
 
 if (( SHOWFP )); then cmd_fp "$ACC"; exit 0; fi
 if (( DOCTOR )); then cmd_doctor "$ACC"; exit 0; fi

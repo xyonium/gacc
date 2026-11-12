@@ -23,11 +23,20 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
-          shellcheck -S warning bin/gacc bin/gen-fonts.sh bin/install-shortcuts.sh deploy-gacc.sh
+          shellcheck -S warning bin/gacc bin/gen-fonts.sh bin/install-shortcuts.sh bin/install-antigravity.sh bin/agsw deploy-gacc.sh
 
       - name: validate json
         run: |
-          for f in etc/policies.json; do
+          for f in $(git ls-files '*.json'); do
             python3 -m json.tool "$f" > /dev/null
             echo "ok: $f"
           done
+
+      - name: no enterprise policies
+        run: |
+          # policies.json 会让 Firefox 在搜索 URL 里加 channel=entpr（可观测的受管控标记）
+          if [ -e etc/policies.json ]; then
+            echo "::error::etc/policies.json 不应存在（会注入 channel=entpr）"
+            exit 1
+          fi
+          echo "ok: 未使用企业策略"

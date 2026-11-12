@@ -35,6 +35,10 @@
 
 ## 3. 选型结论
 
+> ⚠️ 本文是设计初稿，其中「企业策略强装 Multi-Account Containers」的方案**已被废弃**：
+> 实测 policies.json 会让搜索 URL 带 `channel=entpr`，反而是可观测的异常特征。
+> 现方案只用 profile 隔离 + user.js prefs，见 README。
+
 选 **Firefox + 一账户一 profile**，不选 Multi-Account Containers、不选 ungoogled-chromium。
 
 理由（含对原始假设的纠正）：

@@ -128,7 +128,7 @@ Nothing needs to be pre-initialised. The first `./bin/gacc N` (or the first clic
 where you edited the number) creates everything for that account:
 
 ```
-profiles/accNN/  proxy.conf  persona.conf  user.js  containers.json
+profiles/accNN/  proxy.conf  persona.conf  user.js
 runtime/accNN/   home/ config/ cache/ data/ run/
 ```
 
@@ -194,7 +194,8 @@ directory. `profiles/` holds real login state — to drop a single account use
   `firefox/`, `libs/`, `download/` and explicitly lists `cookies.sqlite`, `logins.json`,
   `key4.db`.
 - No network calls, no telemetry; Firefox telemetry and Mozilla account sync are disabled
-  through `policies.json`.
+  through `user.js`. Enterprise `policies.json` is deliberately **not** used: it makes
+  Firefox append `channel=entpr` to search URLs, advertising a managed browser.
 - `deploy-gacc.sh` verifies Mozilla's official `SHA256SUMS` and aborts on mismatch.
 
 ## Verified / unverified

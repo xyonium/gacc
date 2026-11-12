@@ -14,9 +14,12 @@
 @SANDBOX@
 
 // ---------- WebRTC / DNS 泄漏防护 ----------
+// 不要关 media.peerconnection.enabled：那会让 RTCPeerConnection 直接不存在，
+// 任何风控脚本一句 'RTCPeerConnection' in window 就能判定"被改装过"。
+// 防泄漏靠下面两条就够了（只走代理候选、不暴露本机地址）。
+user_pref("media.peerconnection.enabled", true);
 user_pref("media.peerconnection.ice.proxy_only", true);
-user_pref("media.peerconnection.enabled", false);        // 要用 Google Meet 就改 true
-user_pref("media.peerconnection.ice.default_address_only", true);
+user_pref("media.peerconnection.ice.no_host", true);
 user_pref("network.dns.disablePrefetch", true);
 user_pref("network.prefetch-next", false);
 user_pref("network.predictor.enabled", false);
@@ -43,6 +46,11 @@ user_pref("extensions.pocket.enabled", false);
 user_pref("browser.messaging-system.whatsNewPanel.enabled", false);
 
 // ---------- 启动行为：恢复上次会话，每个账户的标签页自动回来 ----------
+// 原本靠 policies.json 锁更新；去掉策略后改用 prefs，避免指纹中途变化
+user_pref("app.update.auto", false);
+user_pref("app.update.enabled", false);
+user_pref("app.update.service.enabled", false);
+
 user_pref("browser.startup.page", 3);
 user_pref("browser.sessionstore.resume_from_crash", true);
 user_pref("browser.shell.checkDefaultBrowser", false);

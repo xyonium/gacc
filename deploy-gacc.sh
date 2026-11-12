@@ -301,28 +301,11 @@ TMPL_EOF
 ok "etc/user.js.tmpl"
 
 # 4.2 企业策略：强装 Multi-Account Containers + 关遥测
-cat > "$DIR/etc/policies.json" <<'J1'
-{
-  "policies": {
-    "DisableTelemetry": true,
-    "DisableFirefoxAccounts": true,
-    "DisablePocket": true,
-    "DisableFeedbackCommands": true,
-    "DisableFirefoxStudies": true,
-    "DontCheckDefaultBrowser": true,
-    "OfferToSaveLogins": false,
-    "ExtensionSettings": {
-      "@testpilot-containers": {
-        "installation_mode": "normal_installed",
-        "install_url": "https://addons.mozilla.org/firefox/downloads/latest/multi-account-containers/latest.xpi"
-      }
-    }
-  }
-}
-J1
+# 故意不生成 policies.json：企业策略会让 Firefox 在搜索 URL 里带 channel=entpr，
+# 等于向对方宣告"这是个受管控的浏览器"。关遥测 / 锁更新全部用 user.js 实现。
 mkdir -p "$DIR/firefox/distribution"
-cp "$DIR/etc/policies.json" "$DIR/firefox/distribution/policies.json"
-ok "etc/policies.json（已注入 firefox/distribution/）"
+rm -f "$DIR/firefox/distribution/policies.json"
+ok "不使用企业策略（避免 channel=entpr 标记）"
 
 # 4.3 启动器
 cat > "$DIR/bin/gacc" <<'GACC'
@@ -342,7 +325,8 @@ cat > "$DIR/bin/gacc" <<'GACC'
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FF="$ROOT/firefox/firefox"
+# 默认用随包的便携版；设 GACC_FIREFOX 可以指向任意 Firefox（apt / snap / 自编译）
+FF="${GACC_FIREFOX:-$ROOT/firefox/firefox}"
 # 系统装了那几个 .so 就不用管；没装时找 libs/ 下的本地补丁（目录名随发行版变，故全量收集）
 LIBDIRS="$(find "$ROOT/libs" -name '*.so*' -printf '%h\n' 2>/dev/null | sort -u | paste -sd: - || true)"
 PROFROOT="$ROOT/profiles"
@@ -359,8 +343,15 @@ persona_of()  { printf '%s/persona.conf' "$(prof_of "$1")"; }
 
 # 精确匹配某个 profile 的进程：路径后面必须紧跟空格或行尾，
 # 否则 acc01 会命中 acc010（10 号账户）的进程，--stop 就会杀错人。
+# 用 ps + 字面匹配而不是 pgrep 的正则：路径里含空格、括号、加号时，
+# 正则会把它们当元字符；而且 acc01 会命中 acc010。case 是纯字面比较，没有这些问题。
 pids_of_profile() {
-  pgrep -f -- "--profile $1( |\$)" 2>/dev/null || true
+  local pid cmd
+  while read -r pid cmd; do
+    case "$cmd" in
+      *"--profile $1 "*|*"--profile $1") printf '%s\n' "$pid" ;;
+    esac
+  done < <(ps -eo pid=,args= 2>/dev/null)
 }
 
 # ---------------------------------------------------------------- 指纹人设
@@ -418,7 +409,8 @@ EOF
 # 键值对解析，不 source：persona.conf 是用户可编辑文件，
 # source 会让文件里任意一行变成「能改 ROOT/FF 的代码」。
 load_persona() {  # $1=acc → 设置 P_TZ / P_CORES / P_DPR
-  local f k v
+  local f k v depth="${2:-0}"
+  (( depth < 3 )) || { echo "gacc: persona.conf 生成失败（$1）" >&2; exit 1; }
   f="$(persona_of "$1")"
   [[ -f "$f" ]] || gen_persona "$1"
   local ACC_RE='^[A-Za-z0-9,;=.q-]+$'
@@ -432,7 +424,7 @@ load_persona() {  # $1=acc → 设置 P_TZ / P_CORES / P_DPR
       dpr)    [[ "$v" =~ ^[0-9.]+$ ]] && P_DPR="$v" ;;
     esac
   done < "$f"
-  [[ -n "$P_TZ" ]] || { gen_persona "$1"; load_persona "$1"; return; }
+  [[ -n "$P_TZ" ]] || { gen_persona "$1" || die "写不了 $(persona_of "$1")"; load_persona "$1" $((depth+1)); return; }
 }
 
 render_persona_block() {  # $1=acc
@@ -442,17 +434,17 @@ user_pref("intl.accept_languages", "$P_ACCEPT");
 user_pref("dom.maxHardwareConcurrency", $P_CORES);
 user_pref("layout.css.devPixelsPerPx", "$P_DPR");
 user_pref("privacy.resistFingerprinting", false);   // RFP 会把所有账户抹成同一组值，反而利于关联
-user_pref("media.navigator.enabled", false);        // 不暴露摄像头/麦克风设备列表
+// 不要关 media.navigator.enabled：开着才正常；设备列表本身不含硬件指纹
 user_pref("javascript.use_us_english_locale", true);
 EOF
 }
 
 # ---------------------------------------------------------------- 代理
-ensure_policies() {
-  local dist="$ROOT/firefox/distribution"
-  mkdir -p "$dist"
-  cmp -s "$ROOT/etc/policies.json" "$dist/policies.json" 2>/dev/null ||
-    cp "$ROOT/etc/policies.json" "$dist/policies.json"
+# 不使用企业策略：policies.json 会让 Firefox 在 Google 搜索 URL 里注入
+# channel=entpr（等于主动告知对方「这是受管控的浏览器」）。遥测/更新锁等全部改用 user.js。
+# 老版本装出来的 policies.json 在这里顺手清掉。
+ensure_no_policies() {
+  rm -f "$ROOT/firefox/distribution/policies.json" 2>/dev/null || true
 }
 
 write_proxy() {  # $1=account $2=spec
@@ -524,23 +516,6 @@ EOF
   esac
 }
 
-seed_containers() {  # 给 Multi-Account Containers 预置 4 个身份（best-effort）
-  local prof="$1" f="$1/containers.json"
-  [[ -f "$f" ]] && return 0
-  cat > "$f" <<'EOF'
-{
-  "version": 5,
-  "lastUserContextId": 4,
-  "identities": [
-    { "userContextId": 1, "public": true, "icon": "circle",  "color": "blue",   "name": "G1" },
-    { "userContextId": 2, "public": true, "icon": "circle",  "color": "green",  "name": "G2" },
-    { "userContextId": 3, "public": true, "icon": "circle",  "color": "orange", "name": "G3" },
-    { "userContextId": 4, "public": true, "icon": "circle",  "color": "purple", "name": "G4" }
-  ]
-}
-EOF
-}
-
 prepare_profile() {  # $1=account
   local acc="$1" prof proxy_blk persona_blk sandbox_blk=""
   prof="$(prof_of "$acc")"
@@ -568,7 +543,6 @@ prepare_profile() {  # $1=account
     { print }
   ' "$TMPL" > "$prof/user.js.tmp"
   mv "$prof/user.js.tmp" "$prof/user.js"
-  seed_containers "$prof"
   printf '%s\n' "$prof"
 }
 
@@ -582,7 +556,11 @@ cmd_list() {
     c="$(awk -F= '/^cores=/{print $2}'  "$d/persona.conf" 2>/dev/null || true)"
     t="$(awk -F= '/^tz=/{print $2}'     "$d/persona.conf" 2>/dev/null || true)"
     l="$(awk -F= '/^locale=/{print $2}' "$d/persona.conf" 2>/dev/null || true)"
-    printf '%-5s %-26s %-7s %-20s %s\n' "$acc" "$p" "${c:-?}" "${t:-?}" "${l:-?}"
+    if [[ -z "$c" ]]; then
+      printf '%-5s %-26s %-7s %-20s %s\n' "$acc" "$p" - 未初始化 -
+    else
+      printf '%-5s %-26s %-7s %-20s %s\n' "$acc" "$p" "$c" "$t" "$l"
+    fi
   done
 }
 
@@ -594,13 +572,22 @@ cmd_fp() {  # $1=account
   echo "  hardwareConcurrency : $P_CORES"
   echo "  devicePixelRatio    : $P_DPR"
   echo
-  echo "  跨账户仍然相同的部分：Canvas / WebGL / 字体列表 / GPU 字符串 / TLS 与 HTTP2 指纹"
+  if [[ -f "$(prof_of "$1")/fonts.conf" ]]; then
+    local nf
+    nf="$(ls "$(prof_of "$1")/fonts" 2>/dev/null | wc -l)"
+    echo "  字体子集            : 已启用（$nf 个字体文件可见，系统共 $(fc-list 2>/dev/null | wc -l) 个）"
+  else
+    echo "  字体子集            : 未启用（看到系统全部字体）→ ./bin/gacc $1 --fonts"
+  fi
+  echo
+  echo "  跨账户仍然相同的部分：Canvas / WebGL / GPU 字符串 / TLS 与 HTTP2 指纹"
 }
 
 cmd_doctor() {  # $1=account
   local acc="$1" prof spec rest host port
   prof="$(prof_of "$acc")"; spec="$(cat "$(proxyfile_of "$acc")" 2>/dev/null || echo direct)"
   echo "账户 $acc"
+  echo "  Firefox : $FF"
   echo "  profile : $prof"
   echo "  代理    : $spec"
   if [[ "$spec" != "direct" ]]; then
@@ -633,7 +620,7 @@ esac
 [[ "$1" =~ ^[0-9]+$ ]] || die "第一个参数要是账户编号，比如 1 / 2 / 3"
 ACC="$1"; shift
 
-URLS=(); DOCTOR=0; NEWFP=0; SHOWFP=0
+URLS=(); DOCTOR=0; NEWFP=0; SHOWFP=0; FONTS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --proxy) [[ $# -ge 2 ]] || die "--proxy 后面要跟地址"; write_proxy "$ACC" "$2"; shift 2 ;;
@@ -642,6 +629,8 @@ while [[ $# -gt 0 ]]; do
     --doctor) DOCTOR=1; shift ;;
     --fp) SHOWFP=1; shift ;;
     --new-fp) NEWFP=1; shift ;;
+    --fonts) FONTS=1; shift ;;
+    --no-fonts) FONTS=0; shift ;;
     --stop)
       pids="$(pids_of_profile "$(prof_of "$ACC")")"
       if [[ -n "$pids" ]]; then
@@ -663,8 +652,19 @@ if (( NEWFP )); then
   exit 0
 fi
 
+PROF_EARLY="$(prof_of "$ACC")"
+if [[ "$FONTS" == "1" ]]; then
+  if "$ROOT/bin/gen-fonts.sh" "$ACC" >/dev/null; then
+    echo "✔ 已生成账户 $ACC 的字体子集"
+  else
+    echo "! 字体子集生成失败，本账户继续用系统全部字体（不影响启动）" >&2
+  fi
+elif [[ "$FONTS" == "0" ]]; then
+  rm -f "$PROF_EARLY/fonts.conf"; echo "✔ 已移除账户 $ACC 的字体子集（回到系统全部字体）"
+fi
+
 prepare_profile "$ACC" >/dev/null
-ensure_policies
+ensure_no_policies
 
 if (( SHOWFP )); then cmd_fp "$ACC"; exit 0; fi
 if (( DOCTOR )); then cmd_doctor "$ACC"; exit 0; fi
@@ -674,10 +674,38 @@ PROF="$(prof_of "$ACC")"
 # 同一个 profile 只能有一个 Firefox 实例，否则会弹 "already running" 并且抢锁
 EXIST="$(pids_of_profile "$PROF" | head -1)"
 if [[ -n "$EXIST" ]]; then
-  echo "✔ 账户 $ACC 已经在运行 (pid $EXIST)，不重复启动"
-  echo "  profile : $PROF"
-  echo "  代理    : $(cat "$PROF/proxy.conf")"
-  echo "  （要改用别的代理：先 ./bin/gacc $ACC --stop）"
+  if (( ${#URLS[@]} == 0 )); then
+    echo "✔ 账户 $ACC 已经在运行 (pid $EXIST)，不重复启动"
+    echo "  profile : $PROF"
+    echo "  代理    : $(cat "$PROF/proxy.conf")"
+    echo "  （要改用别的代理：先 ./bin/gacc $ACC --stop）"
+    exit 0
+  fi
+  # 旧版 gacc 起的实例带 --no-remote，它根本收不到转发的 URL。
+  # 这种情况下直接启动会撞 profile 锁（弹 "already running"），所以先告诉用户。
+  case "$(ps -o args= -p "$EXIST" 2>/dev/null || true)" in
+    *--no-remote*)
+      echo "! 账户 $ACC 正在运行的实例是旧模式（带 --no-remote），收不到转发的 URL。" >&2
+      echo "  先 ./bin/gacc $ACC --stop 再 ./bin/gacc $ACC，之后就正常了。" >&2
+      exit 2 ;;
+  esac
+  # 实测：Firefox 不会把 URL 交给已运行的实例（--class / -P / 有无 dbus 全试过，
+  # 第二次启动只会留下一个 "already running" 对话框并抢 profile 锁）。
+  # 所以这里绝不再启动第二个实例，退化为「把 URL 交到用户手上」。
+  url="${URLS[0]}"
+  clip=0
+  if command -v xclip >/dev/null 2>&1 && printf '%s' "$url" | xclip -selection clipboard 2>/dev/null; then clip=1
+  elif command -v xsel >/dev/null 2>&1 && printf '%s' "$url" | xsel --clipboard --input 2>/dev/null; then clip=1
+  elif command -v wl-copy >/dev/null 2>&1 && printf '%s' "$url" | wl-copy 2>/dev/null; then clip=1
+  fi
+  echo "! 账户 $ACC 已经在运行，无法把 URL 注入这个实例（Firefox 限制）。" >&2
+  if (( clip )); then
+    echo "  ✔ URL 已复制到剪贴板 → 切到该窗口 Ctrl+T 再粘贴回车即可。" >&2
+  else
+    echo "  URL: $url" >&2
+    echo "  （装上 xclip 就会自动复制：sudo apt install xclip）" >&2
+  fi
+  echo "  或者：./bin/gacc $ACC --stop 之后再点一次，它会直接带着 URL 启动。" >&2
   exit 0
 fi
 
@@ -701,13 +729,20 @@ chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
 load_persona "$ACC"
 [[ -n "$P_TZ" ]] && export TZ="$P_TZ"
 
+# 字体子集：只让这个账户看见 fonts.conf 里列出的字体（需绝对路径）
+if [[ -f "$PROF/fonts.conf" ]]; then
+  export FONTCONFIG_FILE="$PROF/fonts.conf"
+fi
+
 # 不用 -width/-height：它会和 browser.startup.page=3 的会话恢复打架
 # （恢复的窗口用 xulstore.json 里的旧尺寸，参数要么被忽略要么多开一个窗口）。
 # 窗口尺寸本来也会被用户拖动改变，不作为指纹维度。
 
-# --no-remote：允许同一 Firefox 同时跑多个 profile
+# 不能加 --no-remote：它会关掉「把 URL 交给同 profile 已运行实例」的能力，
+# 于是 xdg-open / 桌面快捷方式 / OAuth 登录弹窗全部会静默失败。
+# 不同 profile 之间不会互相接管（实测两个账户可并存），所以不需要它。
 # setsid --fork：双重脱离（新 session + 挂到 init 下），关终端也不带走浏览器
-setsid --fork nohup "$FF" --no-remote --profile "$PROF" \
+setsid --fork nohup "$FF" --profile "$PROF" \
       --class "gacc-$ACC" "${URLS[@]}" </dev/null >>"$PROF/firefox.log" 2>&1 &
 
 PID=""
