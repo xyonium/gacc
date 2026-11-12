@@ -11,6 +11,8 @@
 #    ./bin/agsw new work             新建槽位
 #    ./bin/agsw run work             用 work 槽位启动
 #    ./bin/agsw login 2              一步到位：槽位 2 + 登录弹窗指向 gacc 2 号
+#    ./bin/agsw adopt 1              把现有的默认安装（~/.config/Antigravity + ~/.gemini）
+#                                    复制进槽位 1（原目录保留，不动）
 #    ./bin/agsw run work --gacc 2    同一次启动里，把登录弹窗指向 gacc 的 2 号账户
 #    ./bin/agsw run work -- <参数>   把额外参数透传给 Antigravity
 #    ./bin/agsw stop work            关掉该槽位
@@ -105,6 +107,11 @@ cmd_new() {
 sync_slot_xdg() {
   local name="$1" d; d="$(slot_dir "$1")"
   local def="${AGSW_DEFAULT_BROWSER:-}"
+  # 槽位名是账户号时，默认配对同号的 gacc 账户（槽位 2 → gacc-acc02）
+  if [[ -z "$def" && "$name" =~ ^[0-9]+$ ]]; then
+    local cand; cand="$(printf 'gacc-acc%02d.desktop' "$name")"
+    [[ -f "$HOME/.local/share/applications/$cand" ]] && def="$cand"
+  fi
   if [[ -z "$def" ]]; then
     def="$(XDG_CONFIG_HOME="$HOME/.config" xdg-settings get default-web-browser 2>/dev/null || true)"
   fi
@@ -206,6 +213,31 @@ cmd_login() {
   cmd_run "$name" "${ARGS[@]:1}"
 }
 
+# 把「默认位置」的那份安装复制进某个槽位（不移动，原样保留）
+cmd_adopt() {
+  local name="$1" d
+  d="$(slot_dir "$name")"
+  local src_ud="$HOME/.config/Antigravity" src_gm="$HOME/.gemini"
+  [[ -d "$src_ud" ]] || die "没找到 $src_ud（默认那份从没启动过？）"
+  [[ -n "$(slot_pids "$name" | head -1)" ]] && die "槽位 $name 正在运行，先 stop"
+  if ps -eo args= 2>/dev/null | grep -q '[A]ntigravity-x64/antigravity'; then
+    die "默认那份 Antigravity 正在运行，先关掉再迁移（否则会拷贝到一半状态）"
+  fi
+  if (( DRY )); then
+    say "（dry-run）会复制："
+    say "  $src_ud/.  → $d/userdata/"
+    [[ -d "$src_gm" ]] && say "  $src_gm/.  → $d/home/.gemini/"
+    return 0
+  fi
+  mkdir -p "$d"/{home,userdata,logs}
+  cp -a "$src_ud/." "$d/userdata/"
+  if [[ -d "$src_gm" ]]; then cp -a "$src_gm/." "$d/home/.gemini/"; fi
+  sync_slot_xdg "$name"
+  say "✔ 已把默认安装复制进槽位 $name（原目录保留，没动）"
+  say "  启动：$0 run $name"
+  say "  注意：槽位和默认安装现在是两份独立副本，登录态不会自动同步"
+}
+
 cmd_stop() {
   local name="$1" pids
   pids="$(slot_pids "$name" | tr '\n' ' ')"
@@ -230,7 +262,7 @@ cmd_rm() {
 }
 
 # ---------------------------------------------------------------- main
-[[ $# -ge 1 ]] || { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+[[ $# -ge 1 ]] || { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 CMD="$1"; shift
 
 # 解析通用开关（可在子命令前后）
@@ -251,8 +283,9 @@ case "$CMD" in
   new)    [[ ${#ARGS[@]} -ge 1 ]] || die "用法：$0 new <名字>"; cmd_new "${ARGS[0]}" ;;
   run)    [[ ${#ARGS[@]} -ge 1 ]] || die "用法：$0 run <名字> [--gacc N]"; cmd_run "${ARGS[0]}" "${ARGS[@]:1}" ;;
   login)  [[ ${#ARGS[@]} -ge 1 ]] || die "用法：$0 login <账户号>"; cmd_login "${ARGS[0]}" ;;
+  adopt)  [[ ${#ARGS[@]} -ge 1 ]] || die "用法：$0 adopt <槽位名>"; cmd_adopt "${ARGS[0]}" ;;
   stop)   [[ ${#ARGS[@]} -ge 1 ]] || die "用法：$0 stop <名字>"; cmd_stop "${ARGS[0]}" ;;
   rm)     [[ ${#ARGS[@]} -ge 1 ]] || die "用法：$0 rm <名字>"; cmd_rm "${ARGS[0]}" ;;
-  -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//' ;;
-  *) die "不认识的子命令：$CMD（list/new/run/login/stop/rm/status）" ;;
+  -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) die "不认识的子命令：$CMD（list/new/run/login/adopt/stop/rm/status）" ;;
 esac
