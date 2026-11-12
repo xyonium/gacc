@@ -5,7 +5,7 @@
 #  面向：WSL2 / 容器 / 没有 root 的 Linux 环境（不需要 apt install，不动系统）
 #
 #  用法：
-#     bash deploy-gacc.sh                          # 装到 ./gaccounts，3 个账户
+#     bash deploy-gacc.sh                          # 装到 ./gaccounts，1 个账户 + 快捷方式
 #     bash deploy-gacc.sh --dir ~/gacc --accounts 5 --base-port 1081
 #     bash deploy-gacc.sh --proxy-mode direct      # 全部直连（没有代理时用这个）
 #     bash deploy-gacc.sh --force                  # 重新下载 Firefox
@@ -768,6 +768,15 @@ fi
 GACC
 chmod +x "$DIR/bin/gacc"
 ok "bin/gacc"
+
+# 其余脚本也要一起装过去，否则 --fonts / 快捷方式 / Antigravity 槽位都用不了
+for f in gen-fonts.sh install-shortcuts.sh agsw install-antigravity.sh; do
+  if [[ -f "$SCRIPT_DIR/bin/$f" ]]; then
+    cp "$SCRIPT_DIR/bin/$f" "$DIR/bin/$f"
+    chmod +x "$DIR/bin/$f"
+    ok "bin/$f"
+  fi
+done
 
 # ---------------------------------------------------------------- 5. 账户
 step "创建 $ACCOUNTS 个账户"
