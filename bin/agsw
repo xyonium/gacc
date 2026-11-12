@@ -100,6 +100,35 @@ cmd_new() {
   fi
 }
 
+# 槽位有自己的 HOME，也就有自己的 mimeapps.list。不把关联搬进来，
+# xdg-open 在槽位里就找不到浏览器，会落到 WSL 的兜底（打开 Windows 浏览器）。
+sync_slot_xdg() {
+  local name="$1" d; d="$(slot_dir "$1")"
+  local def="${AGSW_DEFAULT_BROWSER:-}"
+  if [[ -z "$def" ]]; then
+    def="$(XDG_CONFIG_HOME="$HOME/.config" xdg-settings get default-web-browser 2>/dev/null || true)"
+  fi
+  [[ -z "$def" ]] && { say "! 没查到系统默认浏览器，槽位里点登录可能会落到 Windows 浏览器"; return 0; }
+  local src=""
+  for c in "$HOME/.local/share/applications/$def" "/usr/share/applications/$def"; do
+    [[ -f "$c" ]] && { src="$c"; break; }
+  done
+  if [[ -z "$src" ]]; then
+    say "! 找不到 $def 的 .desktop，槽位里的链接可能打不开"
+    return 0
+  fi
+  mkdir -p "$d/home/.local/share/applications" "$d/home/.config"
+  cp -f "$src" "$d/home/.local/share/applications/$def"
+  cat > "$d/home/.config/mimeapps.list" <<MIME
+[Default Applications]
+x-scheme-handler/http=$def
+x-scheme-handler/https=$def
+x-scheme-handler/about=$def
+text/html=$def
+MIME
+  say "  槽位内默认浏览器 → $def"
+}
+
 cmd_run() {
   local name="$1"; shift || true
   local bin; bin="$(find_bin)"
@@ -131,11 +160,13 @@ cmd_run() {
     fi
   fi
 
+  if (( ! DRY )); then sync_slot_xdg "$name"; fi
+
   local -a cmd=("$bin" "--user-data-dir=$(slot_dir "$name")/userdata" "$@")
   if (( DRY )); then
     say "（dry-run）会执行："
-    printf '  HOME=%s/home XDG_CONFIG_HOME=%s/config XDG_DATA_HOME=%s/data \\\n    %q' \
-      "$d" "$d" "$d" "${cmd[0]}"
+    printf '  HOME=%s/home （槽位内自带 .config/mimeapps.list 与 .local/share/applications）\\\n    %q' \
+      "$d" "${cmd[0]}"
     printf ' %q' "${cmd[@]:1}"; printf '\n'
     return 0
   fi
@@ -145,10 +176,7 @@ cmd_run() {
   # 那不在 Electron 的 userData 里，只换 --user-data-dir 会让所有槽位共用同一个账号。
   setsid --fork nohup env \
       HOME="$d/home" \
-      XDG_CONFIG_HOME="$d/config" \
       XDG_CACHE_HOME="$d/cache" \
-      XDG_DATA_HOME="$d/data" \
-      XDG_STATE_HOME="$d/state" \
       GSETTINGS_BACKEND=memory \
       "${cmd[@]}" </dev/null >>"$d/logs/launch.log" 2>&1 &
 

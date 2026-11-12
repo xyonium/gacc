@@ -128,6 +128,18 @@ Electron 的 `--user-data-dir` 决定 userData，单实例锁也按它隔离，�
 userData，所以 `agsw` 连 `HOME` 一起换成 `<槽位>/home`。实测：新槽位首次启动显示
 "Welcome to Antigravity!"（未登录），而 `~/.gemini` 的时间戳不变。
 
+**改成独立 HOME 后还要补一步**：`xdg-open` 是按 `$HOME/.config/mimeapps.list` +
+`$HOME/.local/share/applications/` 找默认浏览器的。槽位是空的，点登录就会落到 WSL 的兜底
+（打开 Windows 浏览器）。所以 `agsw` 每次启动前会把当前的默认浏览器 `.desktop` 复制进槽位，
+并写一份槽位自己的 `mimeapps.list`。验证：
+
+```bash
+env HOME=~/.local/share/agsw/slots/2/home xdg-mime query default x-scheme-handler/https
+# 应输出 gacc-acc02.desktop
+```
+
+想强制指定：`AGSW_DEFAULT_BROWSER=gacc-acc03.desktop ./bin/agsw run 2`。
+
 **先别直接用于正式环境**，用独立的根目录试（这也是验证它不会越界的最快方式）：
 
 ```bash
