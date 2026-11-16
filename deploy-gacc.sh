@@ -375,7 +375,7 @@ PERSONAS=(
   'America/Los_Angeles|12|1.25'
 )
 P_LOCALE="en-US"
-P_ACCEPT="en-US,en;q=0.9"
+P_ACCEPT="en-US, en"
 
 gen_persona() {  # $1=acc → 写 persona.conf
   local acc="$1" f used tz cores dpr line
@@ -417,8 +417,8 @@ load_persona() {  # $1=acc → 设置 P_TZ / P_CORES / P_DPR
   (( depth < 3 )) || { echo "gacc: persona.conf 生成失败（$1）" >&2; exit 1; }
   f="$(persona_of "$1")"
   [[ -f "$f" ]] || gen_persona "$1"
-  local ACC_RE='^[A-Za-z0-9,;=.q-]+$'
-  P_LOCALE="en-US"; P_ACCEPT="en-US,en;q=0.9"; P_TZ=""; P_CORES="8"; P_DPR="1"
+  local ACC_RE='^[A-Za-z0-9,;=.q -]+$'
+  P_LOCALE="en-US"; P_ACCEPT="en-US, en"; P_TZ=""; P_CORES="8"; P_DPR="1"
   while IFS='=' read -r k v; do
     case "$k" in
       locale) [[ "$v" =~ ^[A-Za-z-]+$ ]] && P_LOCALE="$v" ;;
@@ -433,14 +433,20 @@ load_persona() {  # $1=acc → 设置 P_TZ / P_CORES / P_DPR
 
 render_persona_block() {  # $1=acc
   load_persona "$1"
+  # 语言用 Firefox 自己的写法（"en-US, en" → 实际发送 en-US,en;q=0.5）。
+  # 必须用 "en-US, en"（逗号+空格）：写成 "en-US,en;q=0.9" 会让 navigator.languages
+  # 出现非法标签 "en;q=0.9"，并让 Intl.getCanonicalLocales() 抛 RangeError。
   cat <<EOF
 user_pref("intl.accept_languages", "$P_ACCEPT");
-user_pref("dom.maxHardwareConcurrency", $P_CORES);
-user_pref("layout.css.devPixelsPerPx", "$P_DPR");
-user_pref("privacy.resistFingerprinting", false);   // RFP 会把所有账户抹成同一组值，反而利于关联
-// 不要关 media.navigator.enabled：开着才正常；设备列表本身不含硬件指纹
-user_pref("javascript.use_us_english_locale", true);
+user_pref("privacy.resistFingerprinting", false);
 EOF
+  # 核数与 DPR 默认跟随真实环境；只有显式要求时才覆盖
+  if [[ -n "${P_FORCE_CORES:-}" ]]; then
+    printf 'user_pref("dom.maxHardwareConcurrency", %s);\n' "$P_CORES"
+  fi
+  if [[ -n "${P_FORCE_DPR:-}" ]]; then
+    printf 'user_pref("layout.css.devPixelsPerPx", "%s");\n' "$P_DPR"
+  fi
 }
 
 # ---------------------------------------------------------------- 代理
@@ -486,6 +492,8 @@ render_proxy_block() {  # $1=account
     socks5)
       cat <<EOF
 user_pref("network.proxy.type", 1);
+user_pref("media.peerconnection.ice.proxy_only", true);
+user_pref("media.peerconnection.ice.no_host", true);
 user_pref("network.proxy.socks", "$host");
 user_pref("network.proxy.socks_port", $port);
 user_pref("network.proxy.socks_version", 5);
@@ -530,12 +538,13 @@ prepare_profile() {  # $1=account
 
   # 本环境能不能跑 Firefox 的内容沙箱（写 /proc/self/uid_map 被拒 → 起不来）
   if ! unshare --user --map-root-user true >/dev/null 2>&1; then
-    sandbox_blk=$'user_pref("security.sandbox.content.level", 0);\nuser_pref("security.sandbox.gpu.level", 0);'
+    sandbox_blk=$'user_pref("security.sandbox.content.level", 0);\nuser_pref("security.sandbox.gpu.level", 0);\nuser_pref("security.sandbox.socket.process.level", 0);'
   elif [[ -f "$prof/prefs.js" ]]; then
     # 环境恢复了：只删我们自己写进去的那两行，不动用户在 about:config 里设的其它 sandbox 值
     sed -i \
       -e '/^user_pref("security\.sandbox\.content\.level", 0);$/d' \
       -e '/^user_pref("security\.sandbox\.gpu\.level", 0);$/d' \
+      -e '/^user_pref("security\.sandbox\.socket\.process\.level", 0);$/d' \
       "$prof/prefs.js" 2>/dev/null || true
   fi
 
@@ -587,6 +596,52 @@ cmd_fp() {  # $1=account
   echo "  跨账户仍然相同的部分：Canvas / WebGL / GPU 字符串 / TLS 与 HTTP2 指纹"
 }
 
+# 按账户当前出口把时区对齐（出口在哪国，时区就该在哪国）
+cmd_sync_tz() {
+  local spec info tz
+  spec="$(cat "$PROF/proxy.conf" 2>/dev/null || echo direct)"
+  if [[ "$spec" == direct ]]; then
+    info="$(curl -sS -m 12 https://ipinfo.io/json 2>/dev/null || true)"
+  else
+    info="$(curl -sS -m 15 --proxy "${spec/socks5:/socks5h:}" https://ipinfo.io/json 2>/dev/null || true)"
+  fi
+  tz="$(printf '%s' "$info" | grep -o '"timezone" *: *"[^"]*"' | cut -d'"' -f4)"
+  local ip; ip="$(printf '%s' "$info" | grep -o '"ip" *: *"[^"]*"' | cut -d'"' -f4)"
+  if [[ -z "$tz" ]]; then
+    echo "✘ 查不到出口信息（代理 $spec 不通？）" >&2
+    return 1
+  fi
+  local old_tz; old_tz="$(awk -F= '/^tz=/{print $2}' "$PROF/persona.conf")"
+  echo "  出口 IP : ${ip:-?}（$spec）"
+  echo "  所在时区: $tz"
+  echo "  当前人设: $old_tz"
+  if [[ "$old_tz" == "$tz" ]]; then
+    echo "✔ 已经一致，不用改"
+    return 0
+  fi
+  if ! grep -q '^tz=' "$PROF/persona.conf"; then
+    printf 'tz=%s\n' "$tz" >> "$PROF/persona.conf"
+  else
+    awk -F= -v tz="$tz" 'BEGIN{OFS="="} /^tz=/{print "tz",tz; next} {print}' \
+      "$PROF/persona.conf" > "$PROF/persona.conf.tmp" && mv "$PROF/persona.conf.tmp" "$PROF/persona.conf"
+  fi
+  echo "✔ 时区已改为 $tz（下次启动生效）"
+  echo "  注意：改时区会让这个账户的 IP/时区组合变化，频繁改本身也是异常信号，定下来就别再动"
+}
+
+# Firefox 会把 prefs 持久化进 prefs.js；user.js 不再写 ≠ 删掉。
+# 旧版本写进去的项会一直生效，必须显式清理。
+cmd_purge_legacy() {
+  local prof="$1" f n=0 before
+  f="$prof/prefs.js"
+  [[ -f "$f" ]] || { echo "  （还没有 prefs.js，无需清理）"; return 0; }
+  before="$(wc -l < "$f")"
+  grep -vE '^user_pref\("(layout\.css\.devPixelsPerPx|dom\.maxHardwareConcurrency|media\.navigator\.enabled|media\.peerconnection\.ice\.(proxy_only|no_host|default_address_only)|browser\.search\.suggest\.enabled|network\.dns\.disablePrefetch|network\.prefetch-next|network\.predictor\.enabled|network\.http\.speculative-parallel-limit|javascript\.use_us_english_locale|intl\.accept_languages)"' \
+      "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  n=$(( before - $(wc -l < "$f") ))
+  echo "  ✔ 账户 $(basename "$prof"): 清掉 $n 行残留（$before → $(wc -l < "$f")）"
+}
+
 cmd_doctor() {  # $1=account
   local acc="$1" prof spec rest host port
   prof="$(prof_of "$acc")"; spec="$(cat "$(proxyfile_of "$acc")" 2>/dev/null || echo direct)"
@@ -602,6 +657,27 @@ cmd_doctor() {  # $1=account
   fi
   load_persona "$acc"
   printf '  人设    : TZ=%s  语言=%s  核心=%s  DPR=%s\n' "$P_TZ" "$P_ACCEPT" "$P_CORES" "$P_DPR"
+
+  # 出口稳定性：同一端点连查 3 次；IP 变了说明代理在轮换节点（Google 会当成异常）
+  local dip duniq
+  dip=""
+  for _dtry in 1 2 3; do
+    if [[ "$spec" == direct ]]; then
+      dip+="$(curl -sS -m 10 https://chatgpt.com/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p')"$'\n'
+    else
+      dip+="$(curl -sS -m 12 --proxy "${spec/socks5:/socks5h:}" https://chatgpt.com/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p')"$'\n'
+    fi
+  done
+  duniq="$(printf '%s' "$dip" | grep . | sort -u | paste -sd' ' || true)"
+  if [[ -z "$duniq" ]]; then
+    echo "  出口    : 探测失败（网络不通）"
+  else
+    echo "  出口    : $duniq"
+    if [[ "$(printf '%s' "$dip" | grep . | sort -u | wc -l)" -gt 1 ]]; then
+      echo "  ⚠ 出口 IP 在轮换：同一账号出现多个 IP，Google 会判为异常/共享账号"
+      echo "    把该分组钉成单个节点（关掉 load-balance / url-test / 轮询）"
+    fi
+  fi
   printf '  沙箱    : '
   if unshare --user --map-root-user true >/dev/null 2>&1; then
     echo "可开（正常，无黄条）"
@@ -624,13 +700,17 @@ esac
 [[ "$1" =~ ^[0-9]+$ ]] || die "第一个参数要是账户编号，比如 1 / 2 / 3"
 ACC="$1"; shift
 
-URLS=(); DOCTOR=0; NEWFP=0; SHOWFP=0; FONTS=""
+URLS=(); DOCTOR=0
+SYNC_TZ=0
+PURGE=0; NEWFP=0; SHOWFP=0; FONTS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --proxy) [[ $# -ge 2 ]] || die "--proxy 后面要跟地址"; write_proxy "$ACC" "$2"; shift 2 ;;
     --proxy=*) write_proxy "$ACC" "${1#*=}"; shift ;;
     --direct) write_proxy "$ACC" direct; shift ;;
     --doctor) DOCTOR=1; shift ;;
+    --sync-tz) SYNC_TZ=1; shift ;;
+    --purge-legacy-prefs) PURGE=1; shift ;;
     --fp) SHOWFP=1; shift ;;
     --new-fp) NEWFP=1; shift ;;
     --fonts) FONTS=1; shift ;;
@@ -667,9 +747,13 @@ elif [[ "$FONTS" == "0" ]]; then
   rm -f "$PROF_EARLY/fonts.conf"; echo "✔ 已移除账户 $ACC 的字体子集（回到系统全部字体）"
 fi
 
-prepare_profile "$ACC" >/dev/null
-ensure_no_policies
+if (( ! PURGE && ! SYNC_TZ && ! SHOWFP && ! DOCTOR )); then
+  prepare_profile "$ACC" >/dev/null
+  ensure_no_policies
+fi
 
+if (( PURGE )); then PROF="$(prof_of "$ACC")"; cmd_purge_legacy "$PROF"; exit 0; fi
+if (( SYNC_TZ )); then PROF="$(prof_of "$ACC")"; cmd_sync_tz; exit $?; fi
 if (( SHOWFP )); then cmd_fp "$ACC"; exit 0; fi
 if (( DOCTOR )); then cmd_doctor "$ACC"; exit 0; fi
 
@@ -717,24 +801,25 @@ fi
 export MOZ_CRASHREPORTER_DISABLE=1
 export MOZ_DISABLE_AUTO_SAFE_MODE=1
 export GSETTINGS_BACKEND=memory
-unset MOZ_ENABLE_WAYLAND
+export MOZ_ENABLE_WAYLAND=0   # 固定 X11：Wayland 下 screen 报 1440x960（稀少），X11 报 1920x1200
 grep -qE '^[[:space:]]*user_pref\("security\.sandbox\.content\.level",[[:space:]]*0\)' "$PROF/user.js" 2>/dev/null \
-  && export MOZ_DISABLE_CONTENT_SANDBOX=1
+  && { export MOZ_DISABLE_CONTENT_SANDBOX=1; export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1;
+    export MOZ_DISABLE_RDD_SANDBOX=1; export MOZ_DISABLE_UTILITY_SANDBOX=1; export MOZ_DISABLE_GMP_SANDBOX=1; }
 
 # 每个账户独立的 HOME/缓存，互不污染
 RUNTIME="$ROOT/runtime/$(printf 'acc%02d' "$ACC")"
 export HOME="$RUNTIME/home" XDG_CONFIG_HOME="$RUNTIME/config" \
-       XDG_CACHE_HOME="$RUNTIME/cache" XDG_DATA_HOME="$RUNTIME/data" \
-       XDG_RUNTIME_DIR="$RUNTIME/run"
-mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR"
-chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+       XDG_CACHE_HOME="$RUNTIME/cache" XDG_DATA_HOME="$RUNTIME/data"
+mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
 
 # 指纹的核心：时区（已验证 Firefox 的 Intl 跟随 TZ）
 load_persona "$ACC"
 [[ -n "$P_TZ" ]] && export TZ="$P_TZ"
 
 # 字体子集：只让这个账户看见 fonts.conf 里列出的字体（需绝对路径）
-if [[ -f "$PROF/fonts.conf" ]]; then
+# 字体子集默认关闭：只暴露 19 个纯开源家族比"最小化容器"还显眼。
+# 要开启需在 persona.conf 里写 fonts=on 并重新跑 gen-fonts.sh。
+if [[ -f "$PROF/fonts.conf" ]] && grep -qx 'fonts=on' "$PROF/persona.conf" 2>/dev/null; then
   export FONTCONFIG_FILE="$PROF/fonts.conf"
 fi
 

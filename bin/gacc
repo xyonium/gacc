@@ -60,7 +60,7 @@ PERSONAS=(
   'America/Los_Angeles|12|1.25'
 )
 P_LOCALE="en-US"
-P_ACCEPT="en-US,en;q=0.9"
+P_ACCEPT="en-US, en"
 
 gen_persona() {  # $1=acc → 写 persona.conf
   local acc="$1" f used tz cores dpr line
@@ -103,7 +103,7 @@ load_persona() {  # $1=acc → 设置 P_TZ / P_CORES / P_DPR
   f="$(persona_of "$1")"
   [[ -f "$f" ]] || gen_persona "$1"
   local ACC_RE='^[A-Za-z0-9,;=.q -]+$'
-  P_LOCALE="en-US"; P_ACCEPT="en-US,en;q=0.9"; P_TZ=""; P_CORES="8"; P_DPR="1"
+  P_LOCALE="en-US"; P_ACCEPT="en-US, en"; P_TZ=""; P_CORES="8"; P_DPR="1"
   while IFS='=' read -r k v; do
     case "$k" in
       locale) [[ "$v" =~ ^[A-Za-z-]+$ ]] && P_LOCALE="$v" ;;
@@ -118,8 +118,9 @@ load_persona() {  # $1=acc → 设置 P_TZ / P_CORES / P_DPR
 
 render_persona_block() {  # $1=acc
   load_persona "$1"
-  # 语言用 Firefox 自己的写法（"en-US, en" → 实际发送 en-US,en;q=0.5）。
-  # "en-US,en;q=0.9" 是 Chrome 的格式，配 Firefox UA 会自相矛盾。
+  # 语言用 Firefox 自己的写法（"en-US, en"；HTTP 头实测仍是 en-US,en;q=0.9，与原生一致）。
+  # 必须用 "en-US, en"（逗号+空格）：写成 "en-US,en;q=0.9" 会让 navigator.languages
+  # 出现非法标签 "en;q=0.9"，并让 Intl.getCanonicalLocales() 抛 RangeError。
   cat <<EOF
 user_pref("intl.accept_languages", "$P_ACCEPT");
 user_pref("privacy.resistFingerprinting", false);
@@ -228,6 +229,7 @@ prepare_profile() {  # $1=account
     sed -i \
       -e '/^user_pref("security\.sandbox\.content\.level", 0);$/d' \
       -e '/^user_pref("security\.sandbox\.gpu\.level", 0);$/d' \
+      -e '/^user_pref("security\.sandbox\.socket\.process\.level", 0);$/d' \
       "$prof/prefs.js" 2>/dev/null || true
   fi
 
@@ -319,7 +321,7 @@ cmd_purge_legacy() {
   f="$prof/prefs.js"
   [[ -f "$f" ]] || { echo "  （还没有 prefs.js，无需清理）"; return 0; }
   before="$(wc -l < "$f")"
-  grep -vE '^user_pref\("(layout\.css\.devPixelsPerPx|dom\.maxHardwareConcurrency|media\.navigator\.enabled|media\.peerconnection\.ice\.(proxy_only|no_host))"' \
+  grep -vE '^user_pref\("(layout\.css\.devPixelsPerPx|dom\.maxHardwareConcurrency|media\.navigator\.enabled|media\.peerconnection\.ice\.(proxy_only|no_host|default_address_only)|browser\.search\.suggest\.enabled|network\.dns\.disablePrefetch|network\.prefetch-next|network\.predictor\.enabled|network\.http\.speculative-parallel-limit|javascript\.use_us_english_locale|intl\.accept_languages)"' \
       "$f" > "$f.tmp" && mv "$f.tmp" "$f"
   n=$(( before - $(wc -l < "$f") ))
   echo "  ✔ 账户 $(basename "$prof"): 清掉 $n 行残留（$before → $(wc -l < "$f")）"
@@ -430,8 +432,10 @@ elif [[ "$FONTS" == "0" ]]; then
   rm -f "$PROF_EARLY/fonts.conf"; echo "✔ 已移除账户 $ACC 的字体子集（回到系统全部字体）"
 fi
 
-prepare_profile "$ACC" >/dev/null
-ensure_no_policies
+if (( ! PURGE && ! SYNC_TZ && ! SHOWFP && ! DOCTOR )); then
+  prepare_profile "$ACC" >/dev/null
+  ensure_no_policies
+fi
 
 if (( PURGE )); then PROF="$(prof_of "$ACC")"; cmd_purge_legacy "$PROF"; exit 0; fi
 if (( SYNC_TZ )); then PROF="$(prof_of "$ACC")"; cmd_sync_tz; exit $?; fi
@@ -482,9 +486,10 @@ fi
 export MOZ_CRASHREPORTER_DISABLE=1
 export MOZ_DISABLE_AUTO_SAFE_MODE=1
 export GSETTINGS_BACKEND=memory
-unset MOZ_ENABLE_WAYLAND
+export MOZ_ENABLE_WAYLAND=0   # 固定 X11：Wayland 下 screen 报 1440x960（稀少），X11 报 1920x1200
 grep -qE '^[[:space:]]*user_pref\("security\.sandbox\.content\.level",[[:space:]]*0\)' "$PROF/user.js" 2>/dev/null \
-  && { export MOZ_DISABLE_CONTENT_SANDBOX=1; export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1; }
+  && { export MOZ_DISABLE_CONTENT_SANDBOX=1; export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1;
+    export MOZ_DISABLE_RDD_SANDBOX=1; export MOZ_DISABLE_UTILITY_SANDBOX=1; export MOZ_DISABLE_GMP_SANDBOX=1; }
 
 # 每个账户独立的 HOME/缓存，互不污染
 RUNTIME="$ROOT/runtime/$(printf 'acc%02d' "$ACC")"

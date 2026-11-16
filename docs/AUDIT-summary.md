@@ -127,3 +127,40 @@ Firefox 拿不到 GPU 适配器名称（软件渲染）。
 
 附带发现：`screen` 的报值随后端变化（X11 下 1920x1200，Wayland 下 1440x960），
 而 X root 是 4000x1440（双虚拟显示器拼接：1440x960 + 2560x1440）。
+
+---
+
+# 第三轮：REVIEW-5 复核后的收尾修复
+
+argon 的第五轮复核发现上一轮修复有 5 处没闭环，均已修并实测：
+
+| # | 问题 | 修法 | 实测证据 |
+|---|---|---|---|
+| 1 | `P_ACCEPT` 默认值仍是 `"en-US,en;q=0.9"`（bin/gacc 两处 + deploy 内嵌三处）→ 新建账号会复发 | 改为 `"en-US, en"`，deploy 内嵌副本已同步 | `grep` 确认 5 处全部一致 |
+| 2 | `prefs.js` 里还残留 7 项（search.suggest / disablePrefetch / prefetch-next / predictor / speculative-parallel-limit / use_us_english_locale / ice.default_address_only） | `--purge-legacy-prefs` 的匹配清单扩到 12 项 | 三账户各清掉 7–8 行，复查 0 残留 |
+| 3 | `prepare_profile` 在 `--purge-legacy-prefs / --fp / --doctor / --sync-tz` 前无条件执行，只读命令也会改写 user.js | 这四个子命令跳过渲染 | 代码已加条件 |
+| 4 | `unshare` 恢复后只删了 content/gpu 两个 sandbox 等级，漏删 `socket.process.level` | sed 补一条 | 代码已加 |
+| 5 | 受限环境只关了 CONTENT/SOCKET，RDD 子进程仍崩 | 补 `MOZ_DISABLE_RDD_SANDBOX/UTILITY/GMP_SANDBOX=1` | 代码已加 |
+| 6 | `unset MOZ_ENABLE_WAYLAND` 并不能禁用 Wayland → screen 报 1440x960、窗口不在 X 树里 | 改为 `export MOZ_ENABLE_WAYLAND=0` 固定 X11 | 实测：X11 窗口可截、`screen=1920x1200`、WebGL 仍为 YES |
+
+## 收尾后的运行时实测（acc03，真实启动）
+
+```
+languages    = ["en-US","en"]
+canonical    = en-US|en            （不再抛 RangeError）
+mediaDevices = function            （不再 undefined）
+webgl        = YES                 （修复前是 NULL）
+RENDERER     = llvmpipe, or similar
+dpr          = 1
+screen       = 1920x1200           （X11 后端；Wayland 下是 1440x960）
+cores        = 8                   （原生值，未伪造）
+```
+
+## 渲染器字符串的最终解释（argon 反汇编确认）
+
+`webgl.sanitize-unmasked-renderer` 默认开启，两个值都是**原生脱敏输出**：
+
+- 软件渲染（swrast）→ 匹配内置规则 → `"llvmpipe, or similar"`
+- 用户环境走 Mesa d3d12 驱动 → 前缀 `"D3D12 (Intel…)"` 不在内置规则表里 → 回退 `"Generic Renderer"`
+
+所以 `"Generic Renderer"` **不是改装证据**；保留默认脱敏反而掩盖了 WSL2 特有的 `D3D12` 字样。
