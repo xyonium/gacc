@@ -33,6 +33,9 @@ case "$ARCH" in
   *) echo "用法：$0 [x64|arm]" >&2; exit 1 ;;
 esac
 
+say() { printf '\n\033[32m==>\033[0m %s\n' "$*"; }
+die() { printf '\n\033[31m✘ %s\033[0m\n' "$*" >&2; exit 1; }
+
 if [[ ${EUID} -eq 0 && -z "${ANTIGRAVITY_DIR:-}" ]]; then
   die "不要用 sudo 运行整个脚本：那样 HOME=/root，会装到 /root/opt/antigravity。
      用普通用户运行，脚本需要权限时会自己调 sudo（会提示你输密码）。"
@@ -41,8 +44,6 @@ fi
 DIR="${ANTIGRAVITY_DIR:-$HOME/opt/antigravity}"
 PAGE="https://antigravity.google/download"
 
-say() { printf '\n\033[32m==>\033[0m %s\n' "$*"; }
-die() { printf '\n\033[31m✘ %s\033[0m\n' "$*" >&2; exit 1; }
 
 for t in curl tar awk grep; do
   command -v "$t" >/dev/null 2>&1 || die "缺少命令 $t"
