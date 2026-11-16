@@ -14,19 +14,11 @@
 @SANDBOX@
 
 // ---------- WebRTC / DNS 泄漏防护 ----------
-// 不要关 media.peerconnection.enabled：那会让 RTCPeerConnection 直接不存在，
-// 任何风控脚本一句 'RTCPeerConnection' in window 就能判定"被改装过"。
-// 防泄漏靠下面两条就够了（只走代理候选、不暴露本机地址）。
+// WebRTC 保持原生：不关 API、也不在无代理时阉割 ICE 候选。
+// （无代理时设 ice.proxy_only 会让候选为空，本身就是可观测异常）
 user_pref("media.peerconnection.enabled", true);
-user_pref("media.peerconnection.ice.proxy_only", true);
-user_pref("media.peerconnection.ice.no_host", true);
-user_pref("network.dns.disablePrefetch", true);
-user_pref("network.prefetch-next", false);
-user_pref("network.predictor.enabled", false);
-user_pref("network.http.speculative-parallel-limit", 0);
 user_pref("network.captive-portal-service.enabled", false);
 user_pref("network.connectivity-service.enabled", false);
-user_pref("browser.search.suggest.enabled", false);
 
 // ---------- 关掉 Firefox 自己的遥测 / 实验 / 账号同步 ----------
 user_pref("toolkit.telemetry.enabled", false);

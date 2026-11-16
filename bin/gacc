@@ -118,14 +118,19 @@ load_persona() {  # $1=acc → 设置 P_TZ / P_CORES / P_DPR
 
 render_persona_block() {  # $1=acc
   load_persona "$1"
+  # 语言用 Firefox 自己的写法（"en-US, en" → 实际发送 en-US,en;q=0.5）。
+  # "en-US,en;q=0.9" 是 Chrome 的格式，配 Firefox UA 会自相矛盾。
   cat <<EOF
 user_pref("intl.accept_languages", "$P_ACCEPT");
-user_pref("dom.maxHardwareConcurrency", $P_CORES);
-user_pref("layout.css.devPixelsPerPx", "$P_DPR");
-user_pref("privacy.resistFingerprinting", false);   // RFP 会把所有账户抹成同一组值，反而利于关联
-// 不要关 media.navigator.enabled：开着才正常；设备列表本身不含硬件指纹
-user_pref("javascript.use_us_english_locale", true);
+user_pref("privacy.resistFingerprinting", false);
 EOF
+  # 核数与 DPR 默认跟随真实环境；只有显式要求时才覆盖
+  if [[ -n "${P_FORCE_CORES:-}" ]]; then
+    printf 'user_pref("dom.maxHardwareConcurrency", %s);\n' "$P_CORES"
+  fi
+  if [[ -n "${P_FORCE_DPR:-}" ]]; then
+    printf 'user_pref("layout.css.devPixelsPerPx", "%s");\n' "$P_DPR"
+  fi
 }
 
 # ---------------------------------------------------------------- 代理
@@ -171,6 +176,8 @@ render_proxy_block() {  # $1=account
     socks5)
       cat <<EOF
 user_pref("network.proxy.type", 1);
+user_pref("media.peerconnection.ice.proxy_only", true);
+user_pref("media.peerconnection.ice.no_host", true);
 user_pref("network.proxy.socks", "$host");
 user_pref("network.proxy.socks_port", $port);
 user_pref("network.proxy.socks_version", 5);
@@ -476,7 +483,9 @@ load_persona "$ACC"
 [[ -n "$P_TZ" ]] && export TZ="$P_TZ"
 
 # 字体子集：只让这个账户看见 fonts.conf 里列出的字体（需绝对路径）
-if [[ -f "$PROF/fonts.conf" ]]; then
+# 字体子集默认关闭：只暴露 19 个纯开源家族比"最小化容器"还显眼。
+# 要开启需在 persona.conf 里写 fonts=on 并重新跑 gen-fonts.sh。
+if [[ -f "$PROF/fonts.conf" ]] && grep -qx 'fonts=on' "$PROF/persona.conf" 2>/dev/null; then
   export FONTCONFIG_FILE="$PROF/fonts.conf"
 fi
 

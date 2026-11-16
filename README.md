@@ -182,6 +182,17 @@ xdg-settings get default-web-browser    # 应为 gacc-acc01.desktop
 Windows 上的程序不受影响（它调的是 Windows 默认浏览器）。
 完整流程（含多账号槽位 `bin/agsw`）见 [docs/antigravity.md](docs/antigravity.md)。
 
+### 默认不伪造硬件相关维度
+
+DPR、CPU 核数、字体集默认**都不改**：真实机器只有一台，伪造这几项会把匿名集缩小而不是扩大
+（详见 [docs/AUDIT-summary.md](docs/AUDIT-summary.md)）。需要时显式开启：
+
+```bash
+echo 'force_dpr=1'   >> profiles/acc02/persona.conf   # 恢复强制 DPR
+echo 'force_cores=1' >> profiles/acc02/persona.conf   # 恢复强制核数
+echo 'fonts=on'      >> profiles/acc02/persona.conf   # 恢复字体子集
+```
+
 ## 沙箱与那条黄条
 
 Firefox 的内容沙箱要写 `/proc/self/uid_map`。某些环境（容器、或把终端套进别的文件沙箱里）
