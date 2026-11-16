@@ -110,3 +110,20 @@ argon：**75–85%** / **15–25%**，并指出反证——acc01 带着 `mediaDe
 仍然登录正常，说明浏览器改造不是单一决定性因素。
 
 两份都建议：**只保留 3 条改造**（TZ 注入、遥测关闭、更新冻结），其余全部还原。
+
+## 5. WebGL 渲染器字符串（实测澄清）
+
+修复 `XDG_RUNTIME_DIR` 后 WebGL 恢复。渲染器字符串对照：
+
+| 场景 | RENDERER / UNMASKED |
+|---|---|
+| 全新 profile（不含任何 pref），X11 后端 | `llvmpipe, or similar` |
+| 全新 profile，headless | `llvmpipe, or similar` |
+| 你的浏览器（Wayland 后端） | `Generic Renderer` |
+
+两个字符串在 `libxul.so` 里相邻，都是 Firefox 自己的渲染器名称规范化输出。
+**全新 profile 也不报真实 GPU 型号**，所以这不是本工具的 pref 造成的，而是 WSLg 下
+Firefox 拿不到 GPU 适配器名称（软件渲染）。
+
+附带发现：`screen` 的报值随后端变化（X11 下 1920x1200，Wayland 下 1440x960），
+而 X root 是 4000x1440（双虚拟显示器拼接：1440x960 + 2560x1440）。
