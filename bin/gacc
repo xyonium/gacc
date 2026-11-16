@@ -102,7 +102,7 @@ load_persona() {  # $1=acc → 设置 P_TZ / P_CORES / P_DPR
   (( depth < 3 )) || { echo "gacc: persona.conf 生成失败（$1）" >&2; exit 1; }
   f="$(persona_of "$1")"
   [[ -f "$f" ]] || gen_persona "$1"
-  local ACC_RE='^[A-Za-z0-9,;=.q-]+$'
+  local ACC_RE='^[A-Za-z0-9,;=.q -]+$'
   P_LOCALE="en-US"; P_ACCEPT="en-US,en;q=0.9"; P_TZ=""; P_CORES="8"; P_DPR="1"
   while IFS='=' read -r k v; do
     case "$k" in
@@ -222,7 +222,7 @@ prepare_profile() {  # $1=account
 
   # 本环境能不能跑 Firefox 的内容沙箱（写 /proc/self/uid_map 被拒 → 起不来）
   if ! unshare --user --map-root-user true >/dev/null 2>&1; then
-    sandbox_blk=$'user_pref("security.sandbox.content.level", 0);\nuser_pref("security.sandbox.gpu.level", 0);'
+    sandbox_blk=$'user_pref("security.sandbox.content.level", 0);\nuser_pref("security.sandbox.gpu.level", 0);\nuser_pref("security.sandbox.socket.process.level", 0);'
   elif [[ -f "$prof/prefs.js" ]]; then
     # 环境恢复了：只删我们自己写进去的那两行，不动用户在 about:config 里设的其它 sandbox 值
     sed -i \
@@ -312,6 +312,19 @@ cmd_sync_tz() {
   echo "  注意：改时区会让这个账户的 IP/时区组合变化，频繁改本身也是异常信号，定下来就别再动"
 }
 
+# Firefox 会把 prefs 持久化进 prefs.js；user.js 不再写 ≠ 删掉。
+# 旧版本写进去的项会一直生效，必须显式清理。
+cmd_purge_legacy() {
+  local prof="$1" f n=0 before
+  f="$prof/prefs.js"
+  [[ -f "$f" ]] || { echo "  （还没有 prefs.js，无需清理）"; return 0; }
+  before="$(wc -l < "$f")"
+  grep -vE '^user_pref\("(layout\.css\.devPixelsPerPx|dom\.maxHardwareConcurrency|media\.navigator\.enabled|media\.peerconnection\.ice\.(proxy_only|no_host))"' \
+      "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+  n=$(( before - $(wc -l < "$f") ))
+  echo "  ✔ 账户 $(basename "$prof"): 清掉 $n 行残留（$before → $(wc -l < "$f")）"
+}
+
 cmd_doctor() {  # $1=account
   local acc="$1" prof spec rest host port
   prof="$(prof_of "$acc")"; spec="$(cat "$(proxyfile_of "$acc")" 2>/dev/null || echo direct)"
@@ -371,7 +384,8 @@ esac
 ACC="$1"; shift
 
 URLS=(); DOCTOR=0
-SYNC_TZ=0; NEWFP=0; SHOWFP=0; FONTS=""
+SYNC_TZ=0
+PURGE=0; NEWFP=0; SHOWFP=0; FONTS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --proxy) [[ $# -ge 2 ]] || die "--proxy 后面要跟地址"; write_proxy "$ACC" "$2"; shift 2 ;;
@@ -379,6 +393,7 @@ while [[ $# -gt 0 ]]; do
     --direct) write_proxy "$ACC" direct; shift ;;
     --doctor) DOCTOR=1; shift ;;
     --sync-tz) SYNC_TZ=1; shift ;;
+    --purge-legacy-prefs) PURGE=1; shift ;;
     --fp) SHOWFP=1; shift ;;
     --new-fp) NEWFP=1; shift ;;
     --fonts) FONTS=1; shift ;;
@@ -418,6 +433,7 @@ fi
 prepare_profile "$ACC" >/dev/null
 ensure_no_policies
 
+if (( PURGE )); then PROF="$(prof_of "$ACC")"; cmd_purge_legacy "$PROF"; exit 0; fi
 if (( SYNC_TZ )); then PROF="$(prof_of "$ACC")"; cmd_sync_tz; exit $?; fi
 if (( SHOWFP )); then cmd_fp "$ACC"; exit 0; fi
 if (( DOCTOR )); then cmd_doctor "$ACC"; exit 0; fi
@@ -468,15 +484,13 @@ export MOZ_DISABLE_AUTO_SAFE_MODE=1
 export GSETTINGS_BACKEND=memory
 unset MOZ_ENABLE_WAYLAND
 grep -qE '^[[:space:]]*user_pref\("security\.sandbox\.content\.level",[[:space:]]*0\)' "$PROF/user.js" 2>/dev/null \
-  && export MOZ_DISABLE_CONTENT_SANDBOX=1
+  && { export MOZ_DISABLE_CONTENT_SANDBOX=1; export MOZ_DISABLE_SOCKET_PROCESS_SANDBOX=1; }
 
 # 每个账户独立的 HOME/缓存，互不污染
 RUNTIME="$ROOT/runtime/$(printf 'acc%02d' "$ACC")"
 export HOME="$RUNTIME/home" XDG_CONFIG_HOME="$RUNTIME/config" \
-       XDG_CACHE_HOME="$RUNTIME/cache" XDG_DATA_HOME="$RUNTIME/data" \
-       XDG_RUNTIME_DIR="$RUNTIME/run"
-mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME" "$XDG_RUNTIME_DIR"
-chmod 700 "$XDG_RUNTIME_DIR" 2>/dev/null || true
+       XDG_CACHE_HOME="$RUNTIME/cache" XDG_DATA_HOME="$RUNTIME/data"
+mkdir -p "$HOME" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME" "$XDG_DATA_HOME"
 
 # 指纹的核心：时区（已验证 Firefox 的 Intl 跟随 TZ）
 load_persona "$ACC"
