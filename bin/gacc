@@ -320,6 +320,27 @@ cmd_doctor() {  # $1=account
   fi
   load_persona "$acc"
   printf '  人设    : TZ=%s  语言=%s  核心=%s  DPR=%s\n' "$P_TZ" "$P_ACCEPT" "$P_CORES" "$P_DPR"
+
+  # 出口稳定性：同一端点连查 3 次；IP 变了说明代理在轮换节点（Google 会当成异常）
+  local dip duniq dtry
+  dip=""
+  for _dtry in 1 2 3; do
+    if [[ "$spec" == direct ]]; then
+      dip+="$(curl -sS -m 10 https://chatgpt.com/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p')"$'\n'
+    else
+      dip+="$(curl -sS -m 12 --proxy "${spec/socks5:/socks5h:}" https://chatgpt.com/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p')"$'\n'
+    fi
+  done
+  duniq="$(printf '%s' "$dip" | grep . | sort -u | paste -sd' ' || true)"
+  if [[ -z "$duniq" ]]; then
+    echo "  出口    : 探测失败（网络不通）"
+  else
+    echo "  出口    : $duniq"
+    if [[ "$(printf '%s' "$dip" | grep . | sort -u | wc -l)" -gt 1 ]]; then
+      echo "  ⚠ 出口 IP 在轮换：同一账号出现多个 IP，Google 会判为异常/共享账号"
+      echo "    把该分组钉成单个节点（关掉 load-balance / url-test / 轮询）"
+    fi
+  fi
   printf '  沙箱    : '
   if unshare --user --map-root-user true >/dev/null 2>&1; then
     echo "可开（正常，无黄条）"
