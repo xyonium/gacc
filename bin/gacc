@@ -272,6 +272,39 @@ cmd_fp() {  # $1=account
   echo "  跨账户仍然相同的部分：Canvas / WebGL / GPU 字符串 / TLS 与 HTTP2 指纹"
 }
 
+# 按账户当前出口把时区对齐（出口在哪国，时区就该在哪国）
+cmd_sync_tz() {
+  local spec info tz
+  spec="$(cat "$PROF/proxy.conf" 2>/dev/null || echo direct)"
+  if [[ "$spec" == direct ]]; then
+    info="$(curl -sS -m 12 https://ipinfo.io/json 2>/dev/null || true)"
+  else
+    info="$(curl -sS -m 15 --proxy "${spec/socks5:/socks5h:}" https://ipinfo.io/json 2>/dev/null || true)"
+  fi
+  tz="$(printf '%s' "$info" | grep -o '"timezone" *: *"[^"]*"' | cut -d'"' -f4)"
+  local ip; ip="$(printf '%s' "$info" | grep -o '"ip" *: *"[^"]*"' | cut -d'"' -f4)"
+  if [[ -z "$tz" ]]; then
+    echo "✘ 查不到出口信息（代理 $spec 不通？）" >&2
+    return 1
+  fi
+  local old_tz; old_tz="$(awk -F= '/^tz=/{print $2}' "$PROF/persona.conf")"
+  echo "  出口 IP : ${ip:-?}（$spec）"
+  echo "  所在时区: $tz"
+  echo "  当前人设: $old_tz"
+  if [[ "$old_tz" == "$tz" ]]; then
+    echo "✔ 已经一致，不用改"
+    return 0
+  fi
+  if ! grep -q '^tz=' "$PROF/persona.conf"; then
+    printf 'tz=%s\n' "$tz" >> "$PROF/persona.conf"
+  else
+    awk -F= -v tz="$tz" 'BEGIN{OFS="="} /^tz=/{print "tz",tz; next} {print}' \
+      "$PROF/persona.conf" > "$PROF/persona.conf.tmp" && mv "$PROF/persona.conf.tmp" "$PROF/persona.conf"
+  fi
+  echo "✔ 时区已改为 $tz（下次启动生效）"
+  echo "  注意：改时区会让这个账户的 IP/时区组合变化，频繁改本身也是异常信号，定下来就别再动"
+}
+
 cmd_doctor() {  # $1=account
   local acc="$1" prof spec rest host port
   prof="$(prof_of "$acc")"; spec="$(cat "$(proxyfile_of "$acc")" 2>/dev/null || echo direct)"
@@ -309,13 +342,15 @@ esac
 [[ "$1" =~ ^[0-9]+$ ]] || die "第一个参数要是账户编号，比如 1 / 2 / 3"
 ACC="$1"; shift
 
-URLS=(); DOCTOR=0; NEWFP=0; SHOWFP=0; FONTS=""
+URLS=(); DOCTOR=0
+SYNC_TZ=0; NEWFP=0; SHOWFP=0; FONTS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --proxy) [[ $# -ge 2 ]] || die "--proxy 后面要跟地址"; write_proxy "$ACC" "$2"; shift 2 ;;
     --proxy=*) write_proxy "$ACC" "${1#*=}"; shift ;;
     --direct) write_proxy "$ACC" direct; shift ;;
     --doctor) DOCTOR=1; shift ;;
+    --sync-tz) SYNC_TZ=1; shift ;;
     --fp) SHOWFP=1; shift ;;
     --new-fp) NEWFP=1; shift ;;
     --fonts) FONTS=1; shift ;;
@@ -355,6 +390,7 @@ fi
 prepare_profile "$ACC" >/dev/null
 ensure_no_policies
 
+if (( SYNC_TZ )); then PROF="$(prof_of "$ACC")"; cmd_sync_tz; exit $?; fi
 if (( SHOWFP )); then cmd_fp "$ACC"; exit 0; fi
 if (( DOCTOR )); then cmd_doctor "$ACC"; exit 0; fi
 
