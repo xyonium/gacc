@@ -322,7 +322,7 @@ cmd_doctor() {  # $1=account
   printf '  人设    : TZ=%s  语言=%s  核心=%s  DPR=%s\n' "$P_TZ" "$P_ACCEPT" "$P_CORES" "$P_DPR"
 
   # 出口稳定性：同一端点连查 3 次；IP 变了说明代理在轮换节点（Google 会当成异常）
-  local dip duniq dtry
+  local dip duniq
   dip=""
   for _dtry in 1 2 3; do
     if [[ "$spec" == direct ]]; then
