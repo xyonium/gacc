@@ -170,6 +170,10 @@ write_proxy() {  # $1=account $2=spec
   local host="${hostport%:*}" port="${hostport##*:}"
   [[ "$hostport" == *:* ]] || die "代理要带端口，例如 socks5://127.0.0.1:1081"
   [[ "$port" =~ ^[0-9]+$ ]] || die "端口不是数字：$port"
+  # 换行/回车/制表/空格 都会破坏 user.js 或 URL 语义，直接拒绝
+  if [[ "$host$creds" == *[$'\n'$'\r'$'\t'\ ]* ]]; then
+    die "主机或凭据里不能含空白/换行字符"
+  fi
   case "$scheme" in
     socks5|socks5h) scheme=socks5 ;;
     socks4|socks)   scheme=socks4 ;;

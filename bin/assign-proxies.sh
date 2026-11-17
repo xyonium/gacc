@@ -170,13 +170,20 @@ for n in "${PLAN_LIST[@]}"; do
   spec="$(spec_for "$n")"; port="${spec##*:}"
   pfile="$ROOT/profiles/acc$(printf '%02d' "$n")/proxy.conf"
   prev="$(cat "$pfile" 2>/dev/null || echo '')"
+  ufile="$ROOT/profiles/acc$(printf '%02d' "$n")/user.js"
+  case "$SCHEME" in
+    http|https) portkey='(http|ssl)_port' ;;
+    *)          portkey='socks_port' ;;
+  esac
   if "$GACC" "$n" --proxy "$spec" --render >/dev/null 2>&1 \
-     && grep -q "network.proxy.socks_port\", $port" "$ROOT/profiles/acc$(printf '%02d' "$n")/user.js" 2>/dev/null; then
+     && grep -qE "network\.proxy\.${portkey}\", ${port}\);" "$ufile" 2>/dev/null; then
     printf '  ✔ acc%02d → %s\n' "$n" "${spec#*@}"
   else
     warn "acc$n 写入或渲染失败"
     FAILED=1
-    if [[ -n "$prev" ]]; then printf '%s\n' "$prev" > "$pfile"; warn "  已回滚 proxy.conf 到 $prev"; fi
+    if [[ -n "$prev" ]]; then printf '%s\n' "$prev" > "$pfile"; else printf 'direct\n' > "$pfile"; fi
+    "$GACC" "$n" --render >/dev/null 2>&1 || true   # 让 user.js 与回滚后的 proxy.conf 重新一致
+    warn "  已回滚并重渲染（$(mask "$(cat "$pfile")")）"
   fi
 done
 
@@ -191,13 +198,13 @@ if (( CHECK )); then
     if [[ -z "$spec" || "$spec" == direct ]]; then printf '  acc%02d  - 直连，跳过\n' "$n"; continue; fi
     ips=""
     for i in $(seq 1 "$SAMPLES"); do
-      ip="$(curl -sS -m 6 --proxy "$spec" "$ECHO_URL" 2>/dev/null | sed -n 's/^ip=//p')"
+      ip="$(ALL_PROXY="$spec" curl -sS -m 6 "$ECHO_URL" 2>/dev/null | sed -n 's/^ip=//p')"
       if [[ -z "$ip" ]]; then
         (( i == 1 )) && break   # 第一次就连不通，不必再采样
         continue
       fi
       ips+="$ip"$'\n'
-      (( i < SAMPLES )) && sleep 1   # 留间隔，才能发现「按时间切换」的轮换
+      (( i < SAMPLES )) && sleep "${GACC_PX_INTERVAL:-1}"   # 间隔可调；分钟级轮换需调大
     done
     uniq="$(printf '%s' "$ips" | grep . | sort -u | paste -sd' ' || true)"
     if [[ -z "$uniq" ]]; then
@@ -220,7 +227,10 @@ fi
 
 {
   echo "# 账户 → 代理（密码已省略）  生成于 $(date -Iseconds)"
-  for n in "${PLAN_LIST[@]}"; do printf 'acc%02d %s\n' "$n" "$(mask "$(spec_for "$n")")"; done
+  for n in "${ACC_LIST[@]}"; do
+    cur="$(cat "$ROOT/profiles/acc$(printf '%02d' "$n")/proxy.conf" 2>/dev/null || echo '')"
+    [[ -n "$cur" ]] && printf 'acc%02d %s\n' "$n" "$(mask "$cur")"
+  done
 } > "$ROOT/profiles/.proxy-map"
 say ""
 [[ -f "$ROOT/profiles/.proxy-map" ]] && say "分配表已写入 profiles/.proxy-map（不含密码）"

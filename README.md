@@ -112,8 +112,17 @@ GACC_PX_USER=alice GACC_PX_PASS=secret \
 凭据写进 `profiles/accNN/proxy.conf`（权限 `600`），下次启动渲染成
 `network.proxy.socks_username` / `socks_password`。
 
-`--check` 会对每个代理连查 3 次：连不通直接标红；**返回多个不同 IP 会告警"出口在轮换"**
-——这正是最容易被 Google 判为账号异常的配置。
+`--check` 默认对每个代理采样 6 次（间隔 1 秒，可用 `GACC_PX_SAMPLES` / `GACC_PX_INTERVAL` 调整）：
+连不通直接标红；**同一代理返回多个不同 IP 会告警"出口在轮换"**——这正是最容易被 Google
+判为账号异常的配置。
+
+> 盲区：默认采样窗口只有几秒，只能发现"按连接随机"的轮换；**分钟级/会话级的切换测不到**。
+> 想覆盖就把 `GACC_PX_INTERVAL` 调大（例如 60，采样 10 次 = 10 分钟）。最可靠的做法仍是
+> 直接看代理客户端的分组策略是不是 load-balance / url-test。
+
+**密码别写在命令行**：`--pass secret` 会进 `~/.bash_history`，也会出现在 `ps` 里。
+用环境变量（`GACC_PX_PASS=... ./bin/assign-proxies.sh`）或者事后清 history。
+`--check` 内部用 `ALL_PROXY` 环境变量传代理，密码不会出现在 curl 的命令行参数里。
 
 ### 权限模型（哪些要 sudo）
 
