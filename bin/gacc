@@ -12,6 +12,10 @@
 #   ./bin/gacc 1 --stop              关掉
 # ============================================================
 set -euo pipefail
+# 浏览器 profile 里可能出现明文代理密码（prefs.js / user.js），
+# 统一用 077 让 Firefox 自己创建/重写的文件也只有本用户可读，
+# 否则它退出时会按默认 umask 把 prefs.js 重写成 644。
+umask 077
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # 默认用随包的便携版；设 GACC_FIREFOX 可以指向任意 Firefox（apt / snap / 自编译）
