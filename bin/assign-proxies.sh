@@ -67,6 +67,7 @@ done
 [[ -n "$HOST" ]] || die "缺少 --host（或环境变量 GACC_PX_HOST）"
 [[ -n "$PORTS" ]] || die "缺少 --ports（或环境变量 GACC_PX_PORTS），例如 1080-1089"
 [[ "$USER_" == *@* ]] && die "用户名里不能有 @"
+[[ -n "$USER_" && -z "$PASS_" ]] && warn "给了 --user 但没给 --pass，将按空密码尝试认证"
 [[ "$PASS_" == *@* ]] && die "密码里不能有 @（会破坏 URL 解析）"
 
 # ---------- 展开端口列表 ----------
@@ -85,11 +86,16 @@ fi
 # ---------- 展开账户列表 ----------
 ACC_LIST=()
 if [[ -n "$ACCOUNTS" ]]; then
-  if [[ "$ACCOUNTS" == *-* ]]; then
-    a="${ACCOUNTS%%-*}"; b="${ACCOUNTS##*-}"
+  if [[ "$ACCOUNTS" =~ ^[0-9]+-[0-9]+$ ]]; then
+    a=$((10#${ACCOUNTS%%-*})); b=$((10#${ACCOUNTS##*-}))
+    (( a >= 1 )) || die "账户号从 1 开始：$ACCOUNTS"
+    (( a <= b )) || die "账户范围起始大于结束：$ACCOUNTS"
     for ((n=a; n<=b; n++)); do ACC_LIST+=("$n"); done
-  else
+  elif [[ "$ACCOUNTS" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
     IFS=',' read -ra ACC_LIST <<< "$ACCOUNTS"
+    for n in "${ACC_LIST[@]}"; do (( n >= 1 )) || die "账户号从 1 开始：$n"; done
+  else
+    die "--accounts 格式应为 1-5 或 1,2,3（收到：$ACCOUNTS）"
   fi
 else
   for d in "$ROOT"/profiles/acc*; do
