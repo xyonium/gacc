@@ -87,6 +87,28 @@ looking ordinary beats looking unique.
 from it on every launch. Only an explicit `--new-fp` re-rolls it. A fingerprint that changes
 daily is itself an anomaly.
 
+### Bind a fixed proxy per account
+
+One account = one stable egress. This matters far more for risk control than any fingerprint tweak.
+
+```bash
+# env style: host + port range (+ optional credentials)
+GACC_PX_HOST=1.2.3.4 GACC_PX_PORTS=1080-1089 \
+GACC_PX_USER=alice GACC_PX_PASS=secret \
+./bin/assign-proxies.sh --accounts 1-5
+
+# preview only
+./bin/assign-proxies.sh --accounts 1-5 --host 1.2.3.4 --ports 1080-1089 --dry-run
+
+# assign, then test each proxy and detect egress rotation
+./bin/assign-proxies.sh --accounts 1-5 --check
+```
+
+Assignment is round-robin: account `i` gets port `(i-1) % count`. Credentials are stored in
+`profiles/accNN/proxy.conf` (mode `600`) and rendered into `network.proxy.socks_username` /
+`socks_password` on the next launch. `--check` probes each proxy three times and warns when a
+single proxy returns **different** exit IPs — the exact pattern that makes Google flag an account.
+
 ### Privileges
 
 `deploy-gacc.sh` needs **no root**: Firefox comes from Mozilla's portable tarball, and missing

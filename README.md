@@ -88,6 +88,33 @@ RFP 会把**所有**账户抹成同一组值（时区强制 UTC、语言强制 e
 `persona.conf` 首次生成后固化，`user.js` 每次启动按它重新渲染。
 只有显式 `--new-fp` 才会重掷。**指纹稳定性比多样性更重要**：同一账号今天一套明天一套，本身就是异常。
 
+### 给每个账户批量绑定固定代理
+
+一个账户长期固定一个出口，是这套方案里**唯一真正影响风控**的配置（比指纹重要得多）。
+
+```bash
+# 环境变量方式：host + 端口范围 + 可选账号密码
+GACC_PX_HOST=1.2.3.4 GACC_PX_PORTS=1080-1089 \
+GACC_PX_USER=alice GACC_PX_PASS=secret \
+./bin/assign-proxies.sh --accounts 1-5
+
+# 先看分配方案（不写文件）
+./bin/assign-proxies.sh --accounts 1-5 --host 1.2.3.4 --ports 1080-1089 --dry-run
+
+# 分配 + 逐个测连通性 + 检测出口是否在轮换
+./bin/assign-proxies.sh --accounts 1-5 --check
+
+# 分配 + 按出口 IP 把时区也对齐
+./bin/assign-proxies.sh --accounts 1-5 --sync-tz
+```
+
+分配规则是 round-robin：账户号 `i` 取第 `(i-1) % 端口数` 个端口。
+凭据写进 `profiles/accNN/proxy.conf`（权限 `600`），下次启动渲染成
+`network.proxy.socks_username` / `socks_password`。
+
+`--check` 会对每个代理连查 3 次：连不通直接标红；**返回多个不同 IP 会告警"出口在轮换"**
+——这正是最容易被 Google 判为账号异常的配置。
+
 ### 权限模型（哪些要 sudo）
 
 | 步骤 | 要不要 root | 说明 |

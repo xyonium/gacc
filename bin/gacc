@@ -151,8 +151,10 @@ write_proxy() {  # $1=account $2=spec
   fi
   [[ "$spec" == *"://"* ]] || spec="socks5://$spec"
   local scheme="${spec%%://*}" rest="${spec#*://}"
-  local host="${rest%:*}" port="${rest##*:}"
-  [[ "$rest" == *:* ]] || die "代理要带端口，例如 socks5://127.0.0.1:1081"
+  local creds="" hostport="$rest"
+  if [[ "$rest" == *@* ]]; then creds="${rest%@*}"; hostport="${rest##*@}"; fi
+  local host="${hostport%:*}" port="${hostport##*:}"
+  [[ "$hostport" == *:* ]] || die "代理要带端口，例如 socks5://127.0.0.1:1081"
   [[ "$port" =~ ^[0-9]+$ ]] || die "端口不是数字：$port"
   case "$scheme" in
     socks5|socks5h) scheme=socks5 ;;
@@ -160,7 +162,12 @@ write_proxy() {  # $1=account $2=spec
     http|https)     ;;
     *) die "只支持 socks5:// socks4:// http:// https:// 或 direct" ;;
   esac
-  printf '%s://%s:%s\n' "$scheme" "$host" "$port" > "$p"
+  if [[ -n "$creds" ]]; then
+    printf '%s://%s@%s:%s\n' "$scheme" "$creds" "$host" "$port" > "$p"
+  else
+    printf '%s://%s:%s\n' "$scheme" "$host" "$port" > "$p"
+  fi
+  chmod 600 "$p" 2>/dev/null || true
 }
 
 render_proxy_block() {  # $1=account
@@ -172,7 +179,15 @@ render_proxy_block() {  # $1=account
     return
   fi
   scheme="${spec%%://*}"; local rest="${spec#*://}"
-  host="${rest%:*}"; port="${rest##*:}"
+  local creds="" hostport="$rest"
+  if [[ "$rest" == *@* ]]; then creds="${rest%@*}"; hostport="${rest##*@}"; fi
+  host="${hostport%:*}"; port="${hostport##*:}"
+  local auth_blk=""
+  if [[ -n "$creds" ]]; then
+    auth_blk="user_pref(\"network.proxy.socks_username\", \"${creds%%:*}\");
+user_pref(\"network.proxy.socks_password\", \"${creds#*:}\");
+"
+  fi
   case "$scheme" in
     socks5)
       cat <<EOF
@@ -183,7 +198,7 @@ user_pref("network.proxy.socks", "$host");
 user_pref("network.proxy.socks_port", $port);
 user_pref("network.proxy.socks_version", 5);
 user_pref("network.proxy.socks_remote_dns", true);   // DNS 走代理，防泄漏
-user_pref("network.proxy.share_proxy_settings", true);
+${auth_blk}user_pref("network.proxy.share_proxy_settings", true);
 user_pref("network.proxy.no_proxies_on", "");
 EOF
       ;;
@@ -387,7 +402,8 @@ ACC="$1"; shift
 
 URLS=(); DOCTOR=0
 SYNC_TZ=0
-PURGE=0; NEWFP=0; SHOWFP=0; FONTS=""
+PURGE=0
+RENDER_ONLY=0; NEWFP=0; SHOWFP=0; FONTS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --proxy) [[ $# -ge 2 ]] || die "--proxy 后面要跟地址"; write_proxy "$ACC" "$2"; shift 2 ;;
@@ -396,6 +412,7 @@ while [[ $# -gt 0 ]]; do
     --doctor) DOCTOR=1; shift ;;
     --sync-tz) SYNC_TZ=1; shift ;;
     --purge-legacy-prefs) PURGE=1; shift ;;
+    --render) RENDER_ONLY=1; shift ;;
     --fp) SHOWFP=1; shift ;;
     --new-fp) NEWFP=1; shift ;;
     --fonts) FONTS=1; shift ;;
@@ -432,12 +449,20 @@ elif [[ "$FONTS" == "0" ]]; then
   rm -f "$PROF_EARLY/fonts.conf"; echo "✔ 已移除账户 $ACC 的字体子集（回到系统全部字体）"
 fi
 
-if (( ! PURGE && ! SYNC_TZ && ! SHOWFP && ! DOCTOR )); then
+if (( ! PURGE && ! SYNC_TZ && ! SHOWFP && ! DOCTOR && ! RENDER_ONLY )); then
   prepare_profile "$ACC" >/dev/null
   ensure_no_policies
 fi
 
 if (( PURGE )); then PROF="$(prof_of "$ACC")"; cmd_purge_legacy "$PROF"; exit 0; fi
+if (( RENDER_ONLY )); then
+  PROF="$(prof_of "$ACC")"
+  prepare_profile "$ACC" >/dev/null
+  ensure_no_policies
+  [[ -f "$PROF/user.js" ]] || die "渲染失败：$PROF/user.js 没生成"
+  echo "✔ 已渲染 $PROF/user.js"
+  exit 0
+fi
 if (( SYNC_TZ )); then PROF="$(prof_of "$ACC")"; cmd_sync_tz; exit $?; fi
 if (( SHOWFP )); then cmd_fp "$ACC"; exit 0; fi
 if (( DOCTOR )); then cmd_doctor "$ACC"; exit 0; fi
