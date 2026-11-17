@@ -18,6 +18,8 @@
 #    ./bin/assign-proxies.sh --accounts 1-5 --check      # 逐个测连通 + 检测 IP 轮换
 #    ./bin/assign-proxies.sh --accounts 1-5 --sync-tz    # 顺便把时区对齐到出口 IP
 #
+#  已有代理的账户默认跳过（不会被静默改写）；确实要改加 --force。
+#
 #  分配规则：账户号 i 依次取第 (i-1) % 端口数 个端口，即 round-robin。
 #  写入 profiles/accNN/proxy.conf（权限 600），并在下次启动时渲染进 user.js。
 # =============================================================================
@@ -56,7 +58,7 @@ while [[ $# -gt 0 ]]; do
     --sync-tz)  SYNC_TZ=1; shift ;;
     --force)    FORCE=1; shift ;;
     --echo)     ECHO_URL="${2:?}"; shift 2 ;;
-    -h|--help)  sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "不认识的参数：$1" ;;
   esac
 done
