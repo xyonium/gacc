@@ -35,6 +35,8 @@ ACCOUNTS=""
 DRY=0
 CHECK=0
 SYNC_TZ=0
+FORCE=0
+ECHO_URL="${GACC_PX_ECHO:-https://chatgpt.com/cdn-cgi/trace}"
 
 say()  { printf '%s\n' "$*"; }
 step() { printf '\n\033[32m==>\033[0m %s\n' "$*"; }
@@ -52,6 +54,8 @@ while [[ $# -gt 0 ]]; do
     --dry-run)  DRY=1; shift ;;
     --check)    CHECK=1; shift ;;
     --sync-tz)  SYNC_TZ=1; shift ;;
+    --force)    FORCE=1; shift ;;
+    --echo)     ECHO_URL="${2:?}"; shift 2 ;;
     -h|--help)  sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "不认识的参数：$1" ;;
   esac
@@ -104,16 +108,40 @@ spec_for() {  # $1=account -> socks5://user:pass@host:port
   fi
 }
 
-step "分配方案（round-robin，${#PORTS_LIST[@]} 个端口 / ${#ACC_LIST[@]} 个账户）"
-printf '  %-8s %-6s %s\n' 账户 端口 代理
+mask() {  # 隐藏密码
+  local spec="$1"
+  if [[ "$spec" == *@* ]]; then printf '%s://%s:***@%s' "${spec%%://*}" "$(printf '%s' "${spec#*://}" | cut -d@ -f1 | cut -d: -f1)" "${spec##*@}"
+  else printf '%s' "$spec"; fi
+}
+
+# 已有非 direct 绑定的账户默认跳过：重跑脚本不该改写既有出口
+SKIP_LIST=()
+PLAN_LIST=()
 for n in "${ACC_LIST[@]}"; do
-  spec="$(spec_for "$n")"; port="${spec##*:}"
-  if [[ -n "$USER_" ]]; then
-    printf '  acc%02d   %-6s %s://%s:***@%s:%s\n' "$n" "$port" "$SCHEME" "$USER_" "$HOST" "$port"
-  else
-    printf '  acc%02d   %-6s %s\n' "$n" "$port" "$spec"
-  fi
+  cur="$(cat "$ROOT/profiles/acc$(printf '%02d' "$n")/proxy.conf" 2>/dev/null || echo '')"
+  if [[ -n "$cur" && "$cur" != direct && $FORCE -eq 0 ]]; then SKIP_LIST+=("$n")
+  else PLAN_LIST+=("$n"); fi
 done
+
+step "分配方案（round-robin，${#PORTS_LIST[@]} 个端口 / ${#PLAN_LIST[@]} 个账户待分配）"
+printf '  %-8s %-6s %-12s %s\n' 账户 端口 动作 代理
+for n in "${PLAN_LIST[@]}"; do
+  spec="$(spec_for "$n")"; port="${spec##*:}"
+  cur="$(cat "$ROOT/profiles/acc$(printf '%02d' "$n")/proxy.conf" 2>/dev/null || echo '')"
+  act="绑定"; [[ -n "$cur" && "$cur" != direct ]] && act="覆盖"
+  printf '  acc%02d   %-6s %-12s %s\n' "$n" "$port" "$act" "$(mask "$spec")"
+  if [[ "$act" == 覆盖 ]]; then printf '           %-12s ↑ 原为 %s\n' "" "$(mask "$cur")"; fi
+done
+for n in "${SKIP_LIST[@]}"; do
+  printf '  acc%02d   %-6s %-12s %s\n' "$n" "-" "已绑定·跳过" "$(mask "$(cat "$ROOT/profiles/acc$(printf '%02d' "$n")/proxy.conf")")"
+done
+(( ${#SKIP_LIST[@]} > 0 )) && say "  （已有出口的账户不会被改动；确实要改请加 --force）"
+
+if (( ${#PLAN_LIST[@]} == 0 )); then
+  say ""
+  say "所有目标账户都已有代理，无需改动。"
+  exit 0
+fi
 
 if (( DRY )); then
   say ""
@@ -122,7 +150,7 @@ if (( DRY )); then
 fi
 
 step "写入 proxy.conf 并渲染 user.js"
-for n in "${ACC_LIST[@]}"; do
+for n in "${PLAN_LIST[@]}"; do
   spec="$(spec_for "$n")"
   "$GACC" "$n" --proxy "$spec" --render >/dev/null 2>&1 \
     && printf '  ✔ acc%02d → %s\n' "$n" "${spec#*@}" \
@@ -137,7 +165,7 @@ if (( CHECK )); then
     spec="$(spec_for "$n")"
     ips=""
     for i in 1 2 3; do
-      ip="$(curl -sS -m 6 --proxy "$spec" https://chatgpt.com/cdn-cgi/trace 2>/dev/null | sed -n 's/^ip=//p')"
+      ip="$(curl -sS -m 6 --proxy "$spec" "$ECHO_URL" 2>/dev/null | sed -n 's/^ip=//p')"
       if [[ -z "$ip" ]]; then
         # 第一次就连不通，不用再试后面两次
         (( i == 1 )) && break
@@ -162,6 +190,11 @@ if (( SYNC_TZ )); then
   for n in "${ACC_LIST[@]}"; do "$GACC" "$n" --sync-tz 2>&1 | sed 's/^/  /'; done
 fi
 
+{
+  echo "# 账户 → 代理（密码已省略）  生成于 $(date -Iseconds)"
+  for n in "${PLAN_LIST[@]}"; do printf 'acc%02d %s\n' "$n" "$(mask "$(spec_for "$n")")"; done
+} > "$ROOT/profiles/.proxy-map"
 say ""
+say "分配表已写入 profiles/.proxy-map（不含密码）"
 say "完成。下次启动各账户时生效：./bin/gacc <n>"
 say "提示：一个账户应长期固定同一个出口；轮换会让 Google 判为异常。"

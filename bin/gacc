@@ -256,6 +256,10 @@ prepare_profile() {  # $1=account
     { print }
   ' "$TMPL" > "$prof/user.js.tmp"
   mv "$prof/user.js.tmp" "$prof/user.js"
+  # 代理带凭据时 user.js 内有明文密码，收紧权限
+  if grep -q 'socks_password' "$prof/user.js" 2>/dev/null; then
+    chmod 600 "$prof/user.js" 2>/dev/null || true
+  fi
   printf '%s\n' "$prof"
 }
 
