@@ -58,7 +58,7 @@ while [[ $# -gt 0 ]]; do
     --sync-tz)  SYNC_TZ=1; shift ;;
     --force)    FORCE=1; shift ;;
     --echo)     ECHO_URL="${2:?}"; shift 2 ;;
-    -h|--help)  sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  awk 'NR>1 && /^#/ {sub(/^# ?/,""); print; next} NR>1 {exit}' "$0"; exit 0 ;;
     *) die "不认识的参数：$1" ;;
   esac
 done
