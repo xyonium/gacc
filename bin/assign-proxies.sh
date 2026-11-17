@@ -76,10 +76,17 @@ if [[ "$PORTS" == *-* ]]; then
   lo="${PORTS%%-*}"; hi="${PORTS##*-}"
   [[ "$lo" =~ ^[0-9]+$ && "$hi" =~ ^[0-9]+$ ]] || die "端口范围格式：1080-1089"
   (( lo <= hi )) || die "端口范围起始大于结束：$PORTS"
+  (( lo >= 1 && hi <= 65535 )) || die "端口必须在 1-65535 之间：$PORTS"
   for ((p=lo; p<=hi; p++)); do PORTS_LIST+=("$p"); done
 else
-  IFS=',' read -ra PORTS_LIST <<< "$PORTS"
-  for p in "${PORTS_LIST[@]}"; do [[ "$p" =~ ^[0-9]+$ ]] || die "端口不是数字：$p"; done
+  IFS=',' read -ra _raw <<< "$PORTS"
+  _dup=0
+  for p in "${_raw[@]}"; do
+    [[ "$p" =~ ^[0-9]+$ ]] || die "端口不是数字：$p"
+    (( p >= 1 && p <= 65535 )) || die "端口必须在 1-65535 之间：$p"
+    if [[ " ${PORTS_LIST[*]:-} " == *" $p "* ]]; then _dup=1; else PORTS_LIST+=("$p"); fi
+  done
+  (( _dup )) && say "  （端口列表有重复，已去重）"
 fi
 (( ${#PORTS_LIST[@]} > 0 )) || die "端口列表为空"
 
@@ -158,28 +165,39 @@ if (( DRY )); then
 fi
 
 step "写入 proxy.conf 并渲染 user.js"
+FAILED=0
 for n in "${PLAN_LIST[@]}"; do
-  spec="$(spec_for "$n")"
-  "$GACC" "$n" --proxy "$spec" --render >/dev/null 2>&1 \
-    && printf '  ✔ acc%02d → %s\n' "$n" "${spec#*@}" \
-    || warn "acc$n 写入失败"
+  spec="$(spec_for "$n")"; port="${spec##*:}"
+  pfile="$ROOT/profiles/acc$(printf '%02d' "$n")/proxy.conf"
+  prev="$(cat "$pfile" 2>/dev/null || echo '')"
+  if "$GACC" "$n" --proxy "$spec" --render >/dev/null 2>&1 \
+     && grep -q "network.proxy.socks_port\", $port" "$ROOT/profiles/acc$(printf '%02d' "$n")/user.js" 2>/dev/null; then
+    printf '  ✔ acc%02d → %s\n' "$n" "${spec#*@}"
+  else
+    warn "acc$n 写入或渲染失败"
+    FAILED=1
+    if [[ -n "$prev" ]]; then printf '%s\n' "$prev" > "$pfile"; warn "  已回滚 proxy.conf 到 $prev"; fi
+  fi
 done
 
 # ---------- 连通性 + 轮换检测 ----------
 if (( CHECK )); then
   step "连通性与出口稳定性（每个代理连查 3 次）"
   command -v curl >/dev/null 2>&1 || { warn "没有 curl，跳过检查"; exit 0; }
+  SAMPLES="${GACC_PX_SAMPLES:-6}"
   for n in "${ACC_LIST[@]}"; do
-    spec="$(spec_for "$n")"
+    # 用账户当前真实绑定的代理，而不是按 round-robin 重算（粘性分配下二者可能不同）
+    spec="$(cat "$ROOT/profiles/acc$(printf '%02d' "$n")/proxy.conf" 2>/dev/null || echo '')"
+    if [[ -z "$spec" || "$spec" == direct ]]; then printf '  acc%02d  - 直连，跳过\n' "$n"; continue; fi
     ips=""
-    for i in 1 2 3; do
+    for i in $(seq 1 "$SAMPLES"); do
       ip="$(curl -sS -m 6 --proxy "$spec" "$ECHO_URL" 2>/dev/null | sed -n 's/^ip=//p')"
       if [[ -z "$ip" ]]; then
-        # 第一次就连不通，不用再试后面两次
-        (( i == 1 )) && break
+        (( i == 1 )) && break   # 第一次就连不通，不必再采样
         continue
       fi
       ips+="$ip"$'\n'
+      (( i < SAMPLES )) && sleep 1   # 留间隔，才能发现「按时间切换」的轮换
     done
     uniq="$(printf '%s' "$ips" | grep . | sort -u | paste -sd' ' || true)"
     if [[ -z "$uniq" ]]; then
@@ -195,7 +213,9 @@ fi
 # ---------- 时区对齐 ----------
 if (( SYNC_TZ )); then
   step "按出口 IP 对齐时区"
-  for n in "${ACC_LIST[@]}"; do "$GACC" "$n" --sync-tz 2>&1 | sed 's/^/  /'; done
+  for n in "${ACC_LIST[@]}"; do
+    "$GACC" "$n" --sync-tz 2>&1 | sed 's/^/  /' || { warn "acc$n 时区同步失败"; FAILED=1; }
+  done
 fi
 
 {
@@ -203,6 +223,10 @@ fi
   for n in "${PLAN_LIST[@]}"; do printf 'acc%02d %s\n' "$n" "$(mask "$(spec_for "$n")")"; done
 } > "$ROOT/profiles/.proxy-map"
 say ""
-say "分配表已写入 profiles/.proxy-map（不含密码）"
+[[ -f "$ROOT/profiles/.proxy-map" ]] && say "分配表已写入 profiles/.proxy-map（不含密码）"
+if (( FAILED )); then
+  warn "部分账户处理失败，见上面的告警"
+  exit 1
+fi
 say "完成。下次启动各账户时生效：./bin/gacc <n>"
 say "提示：一个账户应长期固定同一个出口；轮换会让 Google 判为异常。"

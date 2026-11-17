@@ -28,6 +28,16 @@ die() { echo "gacc: $*" >&2; exit 1; }
 
 prof_of()     { printf '%s/acc%02d' "$PROFROOT" "$1"; }
 proxyfile_of(){ printf '%s/proxy.conf'  "$(prof_of "$1")"; }
+
+# 打印代理时隐藏密码（避免 gacc list/doctor 把明文密码打到终端）
+mask_spec() {
+  local spec="$1"
+  if [[ "$spec" == *@* ]]; then
+    printf '%s://%s:***@%s' "${spec%%://*}" "$(printf '%s' "${spec#*://}" | cut -d@ -f1 | cut -d: -f1)" "${spec##*@}"
+  else
+    printf '%s' "$spec"
+  fi
+}
 persona_of()  { printf '%s/persona.conf' "$(prof_of "$1")"; }
 
 # 精确匹配某个 profile 的进程：路径后面必须紧跟空格或行尾，
@@ -182,10 +192,15 @@ render_proxy_block() {  # $1=account
   local creds="" hostport="$rest"
   if [[ "$rest" == *@* ]]; then creds="${rest%@*}"; hostport="${rest##*@}"; fi
   host="${hostport%:*}"; port="${hostport##*:}"
+  # 转义 \ 和 "（否则密码里的引号可以提前闭合字符串、注入任意 pref）
+  local u="${creds%%:*}" pw="${creds#*:}"
+  u="${u//\\/\\\\}"; u="${u//\"/\\\"}"
+  pw="${pw//\\/\\\\}"; pw="${pw//\"/\\\"}"
+  host="${host//\\/\\\\}"; host="${host//\"/\\\"}"
   local auth_blk=""
   if [[ -n "$creds" ]]; then
-    auth_blk="user_pref(\"network.proxy.socks_username\", \"${creds%%:*}\");
-user_pref(\"network.proxy.socks_password\", \"${creds#*:}\");
+    auth_blk="user_pref(\"network.proxy.socks_username\", \"$u\");
+user_pref(\"network.proxy.socks_password\", \"$pw\");
 "
   fi
   case "$scheme" in
@@ -249,16 +264,20 @@ prepare_profile() {  # $1=account
   fi
 
   # 原子写：先写临时文件再 mv，避免中途打断留下半个 user.js
-  awk -v pb="$proxy_blk" -v fb="$persona_blk" -v sb="$sandbox_blk" '
-    /^@PROXY@$/   { print pb; next }
-    /^@PERSONA@$/ { print fb; next }
-    /^@SANDBOX@$/ { if (sb != "") print sb; next }
+  # 用 ENVIRON 传值：awk -v 会解释反斜杠转义，把 \" 还原成 "（凭据转义会被吃掉）
+  PROXY_BLK="$proxy_blk" PERSONA_BLK="$persona_blk" SANDBOX_BLK="$sandbox_blk" awk '
+    /^@PROXY@$/   { print ENVIRON["PROXY_BLK"]; next }
+    /^@PERSONA@$/ { print ENVIRON["PERSONA_BLK"]; next }
+    /^@SANDBOX@$/ { if (ENVIRON["SANDBOX_BLK"] != "") print ENVIRON["SANDBOX_BLK"]; next }
     { print }
   ' "$TMPL" > "$prof/user.js.tmp"
   mv "$prof/user.js.tmp" "$prof/user.js"
   # 代理带凭据时 user.js 内有明文密码，收紧权限
   if grep -q 'socks_password' "$prof/user.js" 2>/dev/null; then
     chmod 600 "$prof/user.js" 2>/dev/null || true
+  fi
+  if grep -q 'socks_password' "$prof/prefs.js" 2>/dev/null; then
+    chmod 600 "$prof/prefs.js" 2>/dev/null || true
   fi
   printf '%s\n' "$prof"
 }
@@ -269,7 +288,7 @@ cmd_list() {
   for d in "$PROFROOT"/acc*; do
     [[ -d "$d" ]] || continue
     acc="${d##*/acc}"
-    p="$(cat "$d/proxy.conf" 2>/dev/null || echo direct)"
+    p="$(mask_spec "$(cat "$d/proxy.conf" 2>/dev/null || echo direct)")"
     c="$(awk -F= '/^cores=/{print $2}'  "$d/persona.conf" 2>/dev/null || true)"
     t="$(awk -F= '/^tz=/{print $2}'     "$d/persona.conf" 2>/dev/null || true)"
     l="$(awk -F= '/^locale=/{print $2}' "$d/persona.conf" 2>/dev/null || true)"
@@ -352,7 +371,7 @@ cmd_doctor() {  # $1=account
   echo "账户 $acc"
   echo "  Firefox : $FF"
   echo "  profile : $prof"
-  echo "  代理    : $spec"
+  echo "  代理    : $(mask_spec "$spec")"
   if [[ "$spec" != "direct" ]]; then
     rest="${spec#*://}"; host="${rest%:*}"; port="${rest##*:}"
     printf '  连通性  : '
@@ -479,7 +498,7 @@ if [[ -n "$EXIST" ]]; then
   if (( ${#URLS[@]} == 0 )); then
     echo "✔ 账户 $ACC 已经在运行 (pid $EXIST)，不重复启动"
     echo "  profile : $PROF"
-    echo "  代理    : $(cat "$PROF/proxy.conf")"
+    echo "  代理    : $(mask_spec "$(cat "$PROF/proxy.conf")")"
     echo "  （要改用别的代理：先 ./bin/gacc $ACC --stop）"
     exit 0
   fi
@@ -559,7 +578,7 @@ sleep 2
 if [[ -n "$PID" ]] && kill -0 "$PID" 2>/dev/null; then
   echo "✔ 账户 $ACC 已启动 (pid $PID)"
   echo "  profile : $PROF"
-  echo "  代理    : $(cat "$PROF/proxy.conf")"
+  echo "  代理    : $(mask_spec "$(cat "$PROF/proxy.conf")")"
   echo "  人设    : TZ=$P_TZ  语言=${P_ACCEPT%%,*}  核心=$P_CORES  DPR=$P_DPR"
   echo "  日志    : $PROF/firefox.log"
   echo "  停止    : $ROOT/bin/gacc $ACC --stop"
