@@ -88,6 +88,20 @@ RFP 会把**所有**账户抹成同一组值（时区强制 UTC、语言强制 e
 `persona.conf` 首次生成后固化，`user.js` 每次启动按它重新渲染。
 只有显式 `--new-fp` 才会重掷。**指纹稳定性比多样性更重要**：同一账号今天一套明天一套，本身就是异常。
 
+### 给单个账户配代理（最简）
+
+```bash
+./bin/gacc 2 --set-proxy 'socks5://user:pass@server:port'
+./bin/gacc 2 --set-proxy direct        # 取消代理，回到直连
+./bin/gacc 2 --doctor                  # 验证：显示掩码 + 连通性 + 出口时区
+```
+
+`--set-proxy` 只写配置并渲染 `user.js`，**不会启动浏览器**，下次 `./bin/gacc 2` 时生效。
+支持 `socks5://`、`socks4://`、`http://`、`https://`、`direct`；用户名密码可选。
+
+> 密码别写在命令行（会进 `~/.bash_history` 和 `ps`）。用 `assign-proxies.sh` 的环境变量方式，
+> 或事后清 history。写进 `proxy.conf` / `user.js` 的密码文件权限是 `600`。
+
 ### 给每个账户批量绑定固定代理
 
 一个账户长期固定一个出口，是这套方案里**唯一真正影响风控**的配置（比指纹重要得多）。

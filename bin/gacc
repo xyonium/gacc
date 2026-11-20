@@ -434,7 +434,8 @@ ACC="$1"; shift
 URLS=(); DOCTOR=0
 SYNC_TZ=0
 PURGE=0
-RENDER_ONLY=0; NEWFP=0; SHOWFP=0; FONTS=""
+RENDER_ONLY=0
+SET_PROXY=""; NEWFP=0; SHOWFP=0; FONTS=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --proxy) [[ $# -ge 2 ]] || die "--proxy 后面要跟地址"; write_proxy "$ACC" "$2"; shift 2 ;;
@@ -444,6 +445,7 @@ while [[ $# -gt 0 ]]; do
     --sync-tz) SYNC_TZ=1; shift ;;
     --purge-legacy-prefs) PURGE=1; shift ;;
     --render) RENDER_ONLY=1; shift ;;
+    --set-proxy) SET_PROXY="${2:?--set-proxy 后面要跟代理 URL}"; shift 2 ;;
     --fp) SHOWFP=1; shift ;;
     --new-fp) NEWFP=1; shift ;;
     --fonts) FONTS=1; shift ;;
@@ -486,6 +488,18 @@ if (( ! PURGE && ! SYNC_TZ && ! SHOWFP && ! DOCTOR && ! RENDER_ONLY )); then
 fi
 
 if (( PURGE )); then PROF="$(prof_of "$ACC")"; cmd_purge_legacy "$PROF"; exit 0; fi
+if [[ -n "$SET_PROXY" ]]; then
+  PROF="$(prof_of "$ACC")"
+  write_proxy "$ACC" "$SET_PROXY"
+  prepare_profile "$ACC" >/dev/null
+  ensure_no_policies
+  spec="$(cat "$PROF/proxy.conf")"
+  echo "✔ acc$(printf '%02d' "$ACC") 代理已设为：$(mask_spec "$spec")"
+  echo "  profile: $PROF"
+  echo "  下次启动生效：./bin/gacc $ACC"
+  echo "  验证：./bin/gacc $ACC --doctor"
+  exit 0
+fi
 if (( RENDER_ONLY )); then
   PROF="$(prof_of "$ACC")"
   prepare_profile "$ACC" >/dev/null
