@@ -219,13 +219,18 @@ ensure_relay() {  # $1=acc；返回 0 并写 relay.port
 }
 
 kill_relay() {  # $1=acc
-  local rt pidf
+  local rt pidf pid port
   rt="$ROOT/runtime/acc$(printf '%02d' "$1")"; pidf="$rt/relay.pid"
+  port="$(relay_port_of "$1")"
   if [[ -f "$pidf" ]]; then
-    local pid; pid="$(cat "$pidf" 2>/dev/null)"
+    pid="$(cat "$pidf" 2>/dev/null)"
     [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
-    rm -f "$pidf" "$rt/relay.port"
   fi
+  # 兜底：pidfile 丢了（例如 runtime 目录被删）也要把挂在固定端口上的中继清掉
+  while read -r pid; do
+    [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
+  done < <(ps -eo pid=,comm=,args= 2>/dev/null | awk -v p="127.0.0.1:$port" '$2=="python3" && /socks-relay/ && index($0,p) {print $1}')
+  rm -f "$pidf" "$rt/relay.port"
 }
 
 render_proxy_block() {  # $1=account
