@@ -188,6 +188,46 @@ write_proxy() {  # $1=account $2=spec
   chmod 600 "$p" 2>/dev/null || true
 }
 
+relay_port_of() { printf '%s' "$(( 21000 + $1 ))"; }
+
+# Firefox 不支持 SOCKS5 认证（libxul 里没有 network.proxy.socks_username），
+# 所以带用户名/密码的代理要先在本地起一个免认证中继，Firefox 连中继。
+ensure_relay() {  # $1=acc；返回 0 并写 relay.port
+  local acc="$1" prof spec rest creds hp u pw port rt pidf rlog i
+  prof="$(prof_of "$acc")"
+  spec="$(cat "$prof/proxy.conf" 2>/dev/null || echo direct)"
+  [[ "$spec" == *@* ]] || return 0
+  rest="${spec#*://}"; creds="${rest%@*}"; hp="${rest##*@}"
+  u="${creds%%:*}"; pw="${creds#*:}"
+  port="$(relay_port_of "$acc")"
+  rt="$ROOT/runtime/acc$(printf '%02d' "$acc")"
+  pidf="$rt/relay.pid"; rlog="$rt/relay.log"
+  mkdir -p "$rt"
+  if [[ -f "$pidf" ]] && kill -0 "$(cat "$pidf" 2>/dev/null)" 2>/dev/null; then
+    printf '%s' "$port" > "$rt/relay.port"; return 0
+  fi
+  command -v python3 >/dev/null 2>&1 || { echo "! 需要 python3 才能为中继认证代理" >&2; return 1; }
+  setsid --fork nohup python3 "$ROOT/bin/socks-relay.py" \
+    --listen "127.0.0.1:$port" --upstream "$hp" --user "$u" --pass "$pw" \
+    --pidfile "$pidf" >"$rlog" 2>&1 </dev/null
+  for ((i=0; i<50; i++)); do
+    if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then exec 3<&- 2>/dev/null; break; fi
+    sleep 0.1
+  done
+  printf '%s' "$port" > "$rt/relay.port"
+  return 0
+}
+
+kill_relay() {  # $1=acc
+  local rt pidf
+  rt="$ROOT/runtime/acc$(printf '%02d' "$1")"; pidf="$rt/relay.pid"
+  if [[ -f "$pidf" ]]; then
+    local pid; pid="$(cat "$pidf" 2>/dev/null)"
+    [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
+    rm -f "$pidf" "$rt/relay.port"
+  fi
+}
+
 render_proxy_block() {  # $1=account
   local acc="$1" p spec scheme host port
   p="$(proxyfile_of "$acc")"
@@ -200,6 +240,13 @@ render_proxy_block() {  # $1=account
   local creds="" hostport="$rest"
   if [[ "$rest" == *@* ]]; then creds="${rest%@*}"; hostport="${rest##*@}"; fi
   host="${hostport%:*}"; port="${hostport##*:}"
+  # 带认证的代理：Firefox 不支持 SOCKS 认证 → 指向本地免认证中继
+  if [[ -n "$creds" ]]; then
+    local rport
+    rport="$(cat "$ROOT/runtime/acc$(printf '%02d' "$acc")/relay.port" 2>/dev/null || true)"
+    [[ -n "$rport" ]] || rport="$(relay_port_of "$acc")"
+    host="127.0.0.1"; port="$rport"; creds=""
+  fi
   # 转义 \ 和 "（否则密码里的引号可以提前闭合字符串、注入任意 pref）
   local u="${creds%%:*}" pw="${creds#*:}"
   u="${u//\\/\\\\}"; u="${u//\"/\\\"}"
@@ -451,13 +498,14 @@ while [[ $# -gt 0 ]]; do
     --fonts) FONTS=1; shift ;;
     --no-fonts) FONTS=0; shift ;;
     --stop)
+      kill_relay "$ACC"          # 先停中继，即使浏览器没在跑
       pids="$(pids_of_profile "$(prof_of "$ACC")")"
       if [[ -n "$pids" ]]; then
         # shellcheck disable=SC2086
         kill $pids 2>/dev/null || true
         echo "已停止账户 $ACC (pid: $(echo $pids | tr '\n' ' '))"
       else
-        echo "账户 $ACC 没在跑"
+        echo "账户 $ACC 没在跑（中继已清理）"
       fi
       exit 0 ;;
     *) URLS+=("$1"); shift ;;
@@ -482,7 +530,8 @@ elif [[ "$FONTS" == "0" ]]; then
   rm -f "$PROF_EARLY/fonts.conf"; echo "✔ 已移除账户 $ACC 的字体子集（回到系统全部字体）"
 fi
 
-if (( ! PURGE && ! SYNC_TZ && ! SHOWFP && ! DOCTOR && ! RENDER_ONLY )); then
+if (( ! PURGE && ! SYNC_TZ && ! SHOWFP && ! DOCTOR && ! RENDER_ONLY )) || [[ -n "$SET_PROXY" ]]; then
+  ensure_relay "$ACC" || true
   prepare_profile "$ACC" >/dev/null
   ensure_no_policies
 fi
@@ -491,6 +540,7 @@ if (( PURGE )); then PROF="$(prof_of "$ACC")"; cmd_purge_legacy "$PROF"; exit 0;
 if [[ -n "$SET_PROXY" ]]; then
   PROF="$(prof_of "$ACC")"
   write_proxy "$ACC" "$SET_PROXY"
+  ensure_relay "$ACC" || true      # 先按新代理拉起中继，再渲染
   prepare_profile "$ACC" >/dev/null
   ensure_no_policies
   spec="$(cat "$PROF/proxy.conf")"
