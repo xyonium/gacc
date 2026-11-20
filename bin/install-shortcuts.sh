@@ -18,6 +18,7 @@ GACC="$ROOT/bin/gacc"
 ACCOUNTS=""
 MODE=user
 DRY=0
+RC=0
 OUTDIR=""
 NO_WIN=0
 WITH_FONTS=0
@@ -42,6 +43,10 @@ done
 [[ -x "$GACC" ]] || { echo "找不到 $GACC" >&2; exit 1; }
 
 # 默认：已有 profile 的账户号
+for _a in $ACCOUNTS; do
+  [[ "$_a" =~ ^[0-9]+$ ]] || { echo "✘ 账户号必须是数字：$_a" >&2; exit 1; }
+done
+
 if [[ -z "$ACCOUNTS" ]]; then
   ACCOUNTS="$(ls -d "$ROOT"/profiles/acc* 2>/dev/null | sed 's/.*acc0*//' | sort -n | tr '\n' ' ')"
   [[ -n "${ACCOUNTS// }" ]] || ACCOUNTS="1 2 3"
@@ -110,7 +115,10 @@ if [[ -n "$AS_DEFAULT" ]]; then
     # 记下原来的默认浏览器，--revert-default 才有东西可还原
     PREV="$(xdg-settings get default-web-browser 2>/dev/null || true)"
     if [[ -n "$PREV" ]]; then
-      printf '%s\n' "$PREV" > "$APP_DIR/.gacc-prev-browser" 2>/dev/null || true
+      if ! printf '%s\n' "$PREV" > "$APP_DIR/.gacc-prev-browser" 2>/dev/null; then
+        echo "  ! 原默认浏览器（$PREV）没能记录下来，--revert-default 时需手动指定" >&2
+        RC=1
+      fi
       echo "   （原默认浏览器已记录：$PREV）"
     fi
     update-desktop-database "$APP_DIR" 2>/dev/null || true
@@ -210,3 +218,5 @@ cat <<'TIP'
 - 桌面上的 .lnk 用的是 wsl.exe -e，最小化窗口启动，不会挡屏幕。
 - 想改图标：改 .desktop 里的 Icon= 或 .lnk 的 IconLocation。
 TIP
+
+exit "${RC:-0}"

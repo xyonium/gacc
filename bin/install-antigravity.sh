@@ -17,12 +17,14 @@
 # ============================================================================
 set -euo pipefail
 
-CHECK=0; NO_DEPS=0
+CHECK=0; NO_DEPS=0; WANT_SHA=""; SETUID_SANDBOX=0
 ARGS=()
 for a in "$@"; do
   case "$a" in
     --check)   CHECK=1 ;;
     --no-deps) NO_DEPS=1 ;;
+    --sha256)  WANT_SHA="$2"; shift ;;
+    --setuid-sandbox) SETUID_SANDBOX=1 ;;
     -h|--help) sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) ARGS+=("$a") ;;
   esac
@@ -34,6 +36,8 @@ case "$ARCH" in
 esac
 
 say() { printf '\n\033[32m==>\033[0m %s\n' "$*"; }
+ok()  { printf '    \033[32m✔\033[0m %s\n' "$*"; }
+warn(){ printf '    \033[33m!\033[0m %s\n' "$*" >&2; }
 die() { printf '\n\033[31m✘ %s\033[0m\n' "$*" >&2; exit 1; }
 
 if [[ ${EUID} -eq 0 && -z "${ANTIGRAVITY_DIR:-}" ]]; then
@@ -87,7 +91,15 @@ else
   curl -fL --retry 3 --retry-delay 2 -o "$DIR/Antigravity.tar.gz" "$URL"
   # 官方没有发布校验和，这里把实际 SHA256 打出来，方便事后比对/审计
   if command -v sha256sum >/dev/null 2>&1; then
-    say "下载完成，SHA256：$(sha256sum "$DIR/Antigravity.tar.gz" | cut -d' ' -f1)"
+    got="$(sha256sum "$DIR/Antigravity.tar.gz" | cut -d' ' -f1)"
+    if [[ -n "${WANT_SHA:-}" ]]; then
+      [[ "$got" == "$WANT_SHA" ]] || die "SHA256 不匹配！期望 $WANT_SHA，实际 $got"
+      ok "SHA256 校验通过"
+    else
+      warn "未校验下载（官方无 manifest）。SHA256：$got"
+      warn "  下次可加 --sha256 $got 强校验"
+    fi
+    say "SHA256：$got"
     printf '%s  %s\n' "$(sha256sum "$DIR/Antigravity.tar.gz" | cut -d' ' -f1)" "$URL" \
       >> "$DIR/download-manifest.txt" 2>/dev/null || true
   fi
@@ -121,14 +133,20 @@ else
   ok "依赖装好了"
 fi
 
-say "修 chrome-sandbox（Electron/Chromium 在 Linux 的标准步骤）"
+say "chrome-sandbox"
 SB="$(dirname "$BIN")/chrome-sandbox"
-if [[ -f "$SB" ]]; then
+if [[ ! -f "$SB" ]]; then
+  echo "    没有 chrome-sandbox，跳过"
+elif (( SETUID_SANDBOX )); then
+  # 这是唯一需要 root 且有供应链风险的一步（把下载来的文件设成 setuid root）
   sudo chown root:root "$SB"
   sudo chmod 4755 "$SB"
   ls -l "$SB"
+elif unshare --user --map-root-user true >/dev/null 2>&1; then
+  ok "本机支持 user namespace，无需 setuid（保持文件属主不变，更安全）"
 else
-  echo "    没有 chrome-sandbox，跳过"
+  warn "本机不支持 user namespace，可能需要 setuid 才能启动："
+  warn "  加 --setuid-sandbox 重跑（会把该文件设为 root:root 4755）"
 fi
 
 say "注册到应用菜单"

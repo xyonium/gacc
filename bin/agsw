@@ -56,13 +56,15 @@ find_bin() {
 slot_dir() { printf '%s/%s' "$SLOTS" "$1"; }
 
 # 槽位在跑的证据：命令行里带 --user-data-dir=<槽位>
-slot_pids() {
-  local ud; ud="$(slot_dir "$1")/userdata"
-  local pid cmd
+slot_pids() {  # $1=槽位名
+  local ud pid cmd exe
+  ud="$(slot_dir "$1")/userdata"
   while read -r pid cmd; do
-    case "$cmd" in
-      *"--user-data-dir=$ud"*) printf '%s\n' "$pid" ;;
-    esac
+    # 只认「恰好带这个槽位 userdata」的进程
+    case " $cmd " in *" --user-data-dir=$ud "*) ;; *) continue ;; esac
+    # 再校验可执行文件确实是 Antigravity，防止路径串被别的进程带上而误杀
+    exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
+    case "$exe" in *antigravity*|*Antigravity*) printf '%s\n' "$pid" ;; esac
   done < <(ps -eo pid=,args= 2>/dev/null)
 }
 
@@ -221,23 +223,42 @@ cmd_login() {
 
 # 把「默认位置」的那份安装复制进某个槽位（不移动，原样保留）
 cmd_adopt() {
-  local name="$1" d
+  local name="$1" d src_ud src_gm tmp
   d="$(slot_dir "$name")"
-  local src_ud="$HOME/.config/Antigravity" src_gm="$HOME/.gemini"
+  src_ud="$HOME/.config/Antigravity"
+  src_gm="$HOME/.gemini"
   [[ -d "$src_ud" ]] || die "没找到 $src_ud（默认那份从没启动过？）"
   [[ -n "$(slot_pids "$name" | head -1)" ]] && die "槽位 $name 正在运行，先 stop"
-  if ps -eo args= 2>/dev/null | grep -q '[A]ntigravity-x64/antigravity'; then
-    die "默认那份 Antigravity 正在运行，先关掉再迁移（否则会拷贝到一半状态）"
+
+  # 任何路径下的 Antigravity 在跑都不行（不只 Antigravity-x64/）
+  # 用进程名（comm）判断，避免把命令行里带 "antigravity" 字样的 shell 也算进去
+  if ps -eo comm= 2>/dev/null | grep -qiE '^antigravity$|^Antigravity$'; then
+    die "还有 Antigravity 进程在运行，先全部关掉（ps -ef | grep antigravity 查看）"
   fi
+  # gemini CLI 会并发写 ~/.gemini，拷贝等于抓一把正在变的数据
+  if command -v pgrep >/dev/null 2>&1 && pgrep -f '(^|/)gemini( |$)' >/dev/null 2>&1; then
+    die "检测到 gemini CLI 在运行，它会写 ~/.gemini；先退出再 adopt"
+  fi
+
   if (( DRY )); then
     say "（dry-run）会复制："
     say "  $src_ud/.  → $d/userdata/"
     [[ -d "$src_gm" ]] && say "  $src_gm/.  → $d/home/.gemini/"
     return 0
   fi
-  mkdir -p "$d"/{home,userdata,logs}
-  cp -a "$src_ud/." "$d/userdata/"
-  if [[ -d "$src_gm" ]]; then cp -a "$src_gm/." "$d/home/.gemini/"; fi
+
+  # 先拷到临时目录，成功后再替换，避免半拷贝把槽位搞坏
+  tmp="$d/.adopt.tmp"
+  rm -rf "$tmp"; mkdir -p "$tmp/userdata" "$tmp/gemini" "$d/home"
+  if ! cp -a "$src_ud/." "$tmp/userdata/" || \
+     { [[ -d "$src_gm" ]] && ! cp -a "$src_gm/." "$tmp/gemini/"; }; then
+    rm -rf "$tmp"
+    die "复制失败，已回滚（槽位未被改动）"
+  fi
+  rm -rf "$d/userdata" "$d/home/.gemini"
+  mv "$tmp/userdata" "$d/userdata"
+  [[ -d "$src_gm" ]] && mv "$tmp/gemini" "$d/home/.gemini"
+  rm -rf "$tmp"
   sync_slot_xdg "$name"
   say "✔ 已把默认安装复制进槽位 $name（原目录保留，没动）"
   say "  启动：$0 run $name"
