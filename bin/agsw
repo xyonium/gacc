@@ -261,7 +261,10 @@ cmd_rm() {
   [[ -d "$d" ]] || die "槽位不存在：$name"
   [[ -n "$(slot_pids "$name" | head -1)" ]] && die "槽位 $name 还在运行，先 stop"
   (( DRY )) && { say "（dry-run）会删除 $d"; return 0; }
-  read -r -p "删除槽位 $name 的全部数据（含登录态）？[y/N] " a
+  if [[ ! -t 0 ]]; then
+    die "非交互环境，拒绝删除。请到终端手动执行：$0 rm $name，或直接 rm -rf $d"
+  fi
+  read -r -p "删除槽位 $name 的全部数据（含登录态）？[y/N] " a || a=""
   [[ "$a" == [yY] ]] || { say "已取消"; return 0; }
   rm -rf "$d"
   say "✔ 已删除 $name"

@@ -85,6 +85,12 @@ if [[ -f "$DIR/Antigravity.tar.gz" && -x "$(find "$DIR" -maxdepth 2 -name antigr
   echo "    已存在，跳过下载（删掉 $DIR 可重装）"
 else
   curl -fL --retry 3 --retry-delay 2 -o "$DIR/Antigravity.tar.gz" "$URL"
+  # 官方没有发布校验和，这里把实际 SHA256 打出来，方便事后比对/审计
+  if command -v sha256sum >/dev/null 2>&1; then
+    say "下载完成，SHA256：$(sha256sum "$DIR/Antigravity.tar.gz" | cut -d' ' -f1)"
+    printf '%s  %s\n' "$(sha256sum "$DIR/Antigravity.tar.gz" | cut -d' ' -f1)" "$URL" \
+      >> "$DIR/download-manifest.txt" 2>/dev/null || true
+  fi
   tar xzf "$DIR/Antigravity.tar.gz" -C "$DIR"
 fi
 BIN="$(find "$DIR" -maxdepth 2 -name antigravity -type f | head -1)"
