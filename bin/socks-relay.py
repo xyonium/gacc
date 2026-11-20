@@ -13,6 +13,7 @@ Firefox 不支持 SOCKS5 认证（libxul 里没有 network.proxy.socks_username 
 """
 import argparse
 import asyncio
+import os
 import socket
 import struct
 import sys
@@ -30,13 +31,13 @@ async def pipe(reader, writer):
         pass
     finally:
         try:
-            writer.close()
+            writer.write_eof()      # 半关闭：让对向还能把剩余数据写完
         except Exception:
             pass
 
 
 async def open_upstream(host, port, user, pwd, target_host, target_port):
-    reader, writer = await asyncio.open_connection(host, port)
+    reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=10)
     # 方法协商：只提供 0x02（用户名/密码）
     writer.write(b"\x05\x01\x02")
     await writer.drain()
@@ -114,6 +115,11 @@ async def handle(client_reader, client_writer, up_host, up_port, user, pwd):
             pipe(client_reader, up_writer),
             pipe(up_reader, client_writer),
         )
+        for w in (up_writer, client_writer):
+            try:
+                w.close()
+            except Exception:
+                pass
     except Exception:
         try:
             client_writer.close()
@@ -124,6 +130,9 @@ async def handle(client_reader, client_writer, up_host, up_port, user, pwd):
 async def main_async(args):
     host, _, port = args.listen.rpartition(":")
     host = host or "127.0.0.1"
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(f"[relay] 拒绝监听 {host}：只允许 loopback（否则会成为带凭据的开放代理）", file=sys.stderr)
+        raise SystemExit(2)
     up_host, _, up_port = args.upstream.rpartition(":")
 
     async def cb(r, w):
@@ -146,6 +155,11 @@ def main():
     ap.add_argument("--pass", dest="pass_", default="")
     ap.add_argument("--pidfile", default="")
     args = ap.parse_args()
+    # 凭据优先取环境变量：命令行参数会出现在 /proc/PID/cmdline（全机可读）
+    if not args.user:
+        args.user = os.environ.get("SOCKS_RELAY_USER", "")
+    if not args.pass_:
+        args.pass_ = os.environ.get("SOCKS_RELAY_PASS", "")
     try:
         asyncio.run(main_async(args))
     except KeyboardInterrupt:

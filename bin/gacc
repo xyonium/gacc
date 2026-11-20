@@ -30,10 +30,26 @@ die() { echo "gacc: $*" >&2; exit 1; }
 [[ -x "$FF" ]] || die "找不到 $FF（Firefox 没解压？）"
 [[ -f "$TMPL" ]] || die "找不到模板 $TMPL"
 
-prof_of()     { printf '%s/acc%02d' "$PROFROOT" "$1"; }
+prof_of()     { printf '%s/acc%02d' "$PROFROOT" "$((10#$1))"; }
 proxyfile_of(){ printf '%s/proxy.conf'  "$(prof_of "$1")"; }
 
 # 打印代理时隐藏密码（避免 gacc list/doctor 把明文密码打到终端）
+
+# 打印中继状态（带凭据的代理才有中继）
+relay_status_line() {
+  local acc="$1" rp
+  [[ "$(cat "$(proxyfile_of "$acc")" 2>/dev/null)" == *@* ]] || return 0
+  rp="$(cat "$ROOT/runtime/acc$(printf '%02d' "$acc")/relay.port" 2>/dev/null || true)"
+  if [[ -n "$rp" ]] && (exec 3<>"/dev/tcp/127.0.0.1/$rp") 2>/dev/null; then
+    exec 3<&- 2>/dev/null || true
+    echo "  中继    : 127.0.0.1:$rp ✅（Firefox 连这里，中继带认证连上游）"
+  elif [[ -z "$(pids_of_profile "$(prof_of "$acc")" | head -1)" ]]; then
+    echo "  中继    : 未运行（浏览器也没在跑；启动时会自动拉起）"
+  else
+    echo "  中继    : ❌ 浏览器在跑但中继没起来 —— 页面会连不上，先 --stop 再启动"
+  fi
+}
+
 mask_spec() {
   local spec="$1"
   if [[ "$spec" == *@* ]]; then
@@ -188,32 +204,55 @@ write_proxy() {  # $1=account $2=spec
   chmod 600 "$p" 2>/dev/null || true
 }
 
-relay_port_of() { printf '%s' "$(( 21000 + $1 ))"; }
+relay_port_of() { printf '%s' "$(( 21000 + 10#$1 ))"; }
 
 # Firefox 不支持 SOCKS5 认证（libxul 里没有 network.proxy.socks_username），
 # 所以带用户名/密码的代理要先在本地起一个免认证中继，Firefox 连中继。
-ensure_relay() {  # $1=acc；返回 0 并写 relay.port
-  local acc="$1" prof spec rest creds hp u pw port rt pidf rlog i
+ensure_relay() {  # $1=acc；成功返回 0（relay.port 已写）
+  local acc="$1" prof spec rest creds hp u pw port rt pidf rlog scheme hash cur i
   prof="$(prof_of "$acc")"
   spec="$(cat "$prof/proxy.conf" 2>/dev/null || echo direct)"
-  [[ "$spec" == *@* ]] || return 0
+  [[ "$spec" == direct ]] && return 0
+  scheme="${spec%%://*}"
+  # Firefox 只支持无认证 SOCKS5；http/https 会弹认证框，socks4 没有认证机制
+  case "$scheme" in
+    socks5|socks5h) ;;
+    *) return 0 ;;
+  esac
+  [[ "$spec" == *@* ]] || return 0        # 没有凭据就不用中继
+
   rest="${spec#*://}"; creds="${rest%@*}"; hp="${rest##*@}"
   u="${creds%%:*}"; pw="${creds#*:}"
   port="$(relay_port_of "$acc")"
   rt="$ROOT/runtime/acc$(printf '%02d' "$acc")"
   pidf="$rt/relay.pid"; rlog="$rt/relay.log"
   mkdir -p "$rt"
+  hash="$(printf '%s' "$spec" | sha256sum | cut -d' ' -f1)"
+
+  # 已在跑且 spec 没变 → 复用；spec 变了（换代理）必须重启，否则还在用旧凭据
   if [[ -f "$pidf" ]] && kill -0 "$(cat "$pidf" 2>/dev/null)" 2>/dev/null; then
-    printf '%s' "$port" > "$rt/relay.port"; return 0
+    cur="$(cat "$rt/relay.spec" 2>/dev/null || true)"
+    if [[ "$cur" == "$hash" ]]; then printf '%s' "$port" > "$rt/relay.port"; return 0; fi
+    kill_relay "$acc"
   fi
+
   command -v python3 >/dev/null 2>&1 || { echo "! 需要 python3 才能为中继认证代理" >&2; return 1; }
-  setsid --fork nohup python3 "$ROOT/bin/socks-relay.py" \
-    --listen "127.0.0.1:$port" --upstream "$hp" --user "$u" --pass "$pw" \
+  printf '%s' "$hash" > "$rt/relay.spec"; chmod 600 "$rt/relay.spec" 2>/dev/null || true
+  # 凭据用环境变量传给中继：命令行参数在 /proc/PID/cmdline 里对全机可读
+  setsid --fork nohup env SOCKS_RELAY_USER="$u" SOCKS_RELAY_PASS="$pw" \
+    python3 "$ROOT/bin/socks-relay.py" --listen "127.0.0.1:$port" --upstream "$hp" \
     --pidfile "$pidf" >"$rlog" 2>&1 </dev/null
+
+  local ok=0
   for ((i=0; i<50; i++)); do
-    if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then exec 3<&- 2>/dev/null; break; fi
+    if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then exec 3<&- 2>/dev/null; ok=1; break; fi
     sleep 0.1
   done
+  if (( ! ok )); then
+    echo "! 代理中继启动失败，日志：$rlog" >&2
+    tail -3 "$rlog" 2>/dev/null | sed 's/^/    /' >&2
+    return 1
+  fi
   printf '%s' "$port" > "$rt/relay.port"
   return 0
 }
@@ -224,13 +263,15 @@ kill_relay() {  # $1=acc
   port="$(relay_port_of "$1")"
   if [[ -f "$pidf" ]]; then
     pid="$(cat "$pidf" 2>/dev/null)"
-    [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
+    if [[ -n "$pid" ]] && tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q 'socks-relay.py'; then
+      kill "$pid" 2>/dev/null || true
+    fi
   fi
   # 兜底：pidfile 丢了（例如 runtime 目录被删）也要把挂在固定端口上的中继清掉
   while read -r pid; do
     [[ -n "$pid" ]] && kill "$pid" 2>/dev/null || true
   done < <(ps -eo pid=,comm=,args= 2>/dev/null | awk -v p="127.0.0.1:$port" '$2=="python3" && /socks-relay/ && index($0,p) {print $1}')
-  rm -f "$pidf" "$rt/relay.port"
+  rm -f "$pidf" "$rt/relay.port" "$rt/relay.spec"
 }
 
 render_proxy_block() {  # $1=account
@@ -246,7 +287,7 @@ render_proxy_block() {  # $1=account
   if [[ "$rest" == *@* ]]; then creds="${rest%@*}"; hostport="${rest##*@}"; fi
   host="${hostport%:*}"; port="${hostport##*:}"
   # 带认证的代理：Firefox 不支持 SOCKS 认证 → 指向本地免认证中继
-  if [[ -n "$creds" ]]; then
+  if [[ -n "$creds" && ( "$scheme" == socks5 || "$scheme" == socks5h ) ]]; then
     local rport
     rport="$(cat "$ROOT/runtime/acc$(printf '%02d' "$acc")/relay.port" 2>/dev/null || true)"
     [[ -n "$rport" ]] || rport="$(relay_port_of "$acc")"
@@ -432,6 +473,7 @@ cmd_doctor() {  # $1=account
   echo "  Firefox : $FF"
   echo "  profile : $prof"
   echo "  代理    : $(mask_spec "$spec")"
+  relay_status_line "$acc"
   if [[ "$spec" != "direct" ]]; then
     rest="${spec#*://}"; host="${rest%:*}"; port="${rest##*:}"
     printf '  连通性  : '
@@ -482,6 +524,9 @@ esac
 
 [[ "$1" =~ ^[0-9]+$ ]] || die "第一个参数要是账户编号，比如 1 / 2 / 3"
 ACC="$1"; shift
+# 归一化账户号：08/09 这类前导零会被 printf %02d 和 $(( )) 当成八进制
+[[ "$ACC" =~ ^[0-9]+$ ]] || die "账户号必须是数字：$ACC"
+ACC=$((10#$ACC))
 
 URLS=(); DOCTOR=0
 SYNC_TZ=0
@@ -536,7 +581,7 @@ elif [[ "$FONTS" == "0" ]]; then
 fi
 
 if (( ! PURGE && ! SYNC_TZ && ! SHOWFP && ! DOCTOR && ! RENDER_ONLY )) || [[ -n "$SET_PROXY" ]]; then
-  ensure_relay "$ACC" || true
+  ensure_relay "$ACC" || die "认证代理的中继没起来，先修好它再启动（上面有日志路径）"
   prepare_profile "$ACC" >/dev/null
   ensure_no_policies
 fi
@@ -545,7 +590,7 @@ if (( PURGE )); then PROF="$(prof_of "$ACC")"; cmd_purge_legacy "$PROF"; exit 0;
 if [[ -n "$SET_PROXY" ]]; then
   PROF="$(prof_of "$ACC")"
   write_proxy "$ACC" "$SET_PROXY"
-  ensure_relay "$ACC" || true      # 先按新代理拉起中继，再渲染
+  ensure_relay "$ACC" || die "认证代理的中继没起来（见上面日志）"
   prepare_profile "$ACC" >/dev/null
   ensure_no_policies
   spec="$(cat "$PROF/proxy.conf")"
@@ -576,6 +621,8 @@ if [[ -n "$EXIST" ]]; then
     echo "✔ 账户 $ACC 已经在运行 (pid $EXIST)，不重复启动"
     echo "  profile : $PROF"
     echo "  代理    : $(mask_spec "$(cat "$PROF/proxy.conf")")"
+  relay_status_line "$(basename "$PROF" | sed 's/^acc//')"
+    relay_status_line "$ACC"
     echo "  （要改用别的代理：先 ./bin/gacc $ACC --stop）"
     exit 0
   fi
